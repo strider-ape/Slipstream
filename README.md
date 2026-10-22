@@ -2,7 +2,14 @@
 
 A light, fast, open-source download manager for **Windows and Linux**, written in Rust.
 
-**Status:** early development (milestone M0). Nothing usable yet.
+**Status:** early development (milestone M2): single-connection downloads with resume.
+
+## Try it
+```
+cargo run --release -p slipstream-cli -- get https://example.com/file.zip -d downloads
+```
+Press Ctrl+C to pause; run the same command again to resume. A download is kept in
+`<name>.slipstream.part` with its progress in `<name>.slipstream.json` until it finishes.
 
 ## Goals for v1
 1. **Fast downloads**: many connections per file with dynamic segmentation, resume after crashes or reboots.
