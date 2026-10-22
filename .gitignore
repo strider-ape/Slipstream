@@ -1,0 +1,13 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# local test downloads
+*.slipstream.part
+*.slipstream.json
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
