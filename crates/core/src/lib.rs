@@ -2,6 +2,8 @@
 //! See `docs/SPEC-engine.md`.
 
 pub mod filename;
+pub mod state;
+pub mod storage;
 
 /// Version of the engine, shared by every Slipstream binary.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
