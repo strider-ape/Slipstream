@@ -1,0 +1,15 @@
+[package]
+name = "testserver"
+description = "Local HTTP server for engine tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "testserver"
+path = "src/main.rs"
+
+[dependencies]
+slipstream-core.workspace = true

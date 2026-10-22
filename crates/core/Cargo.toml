@@ -1,0 +1,10 @@
+[package]
+name = "slipstream-core"
+description = "Segmented download engine for Slipstream"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]

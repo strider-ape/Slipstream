@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/daemon",
+    "crates/cli",
+    "crates/nmhost",
+    "crates/gui",
+    "tools/testserver",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/strider-ape/Slipstream"
+
+[workspace.dependencies]
+slipstream-core = { path = "crates/core" }
+
+# Small, fast release binaries: whole-program optimisation, no debug symbols.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,15 @@
+[package]
+name = "slipstream-nmhost"
+description = "Slipstream native messaging host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "slipstream-nmhost"
+path = "src/main.rs"
+
+[dependencies]
+slipstream-core.workspace = true

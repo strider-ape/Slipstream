@@ -1,0 +1,15 @@
+[package]
+name = "slipstream-cli"
+description = "Slipstream command-line client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "slipstream"
+path = "src/main.rs"
+
+[dependencies]
+slipstream-core.workspace = true

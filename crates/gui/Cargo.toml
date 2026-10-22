@@ -1,0 +1,15 @@
+[package]
+name = "slipstream-gui"
+description = "Slipstream desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "slipstream-gui"
+path = "src/main.rs"
+
+[dependencies]
+slipstream-core.workspace = true
