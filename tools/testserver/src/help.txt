@@ -4,7 +4,20 @@ Every file is virtual: bytes are computed from their offset, so any size is free
 
 GET /file/{name}            a file with Range, ETag, Last-Modified, If-Range
 
-Query parameters (combine freely):
-  size=N        file size in bytes (default 1048576)
-  seed=N        content seed (default: from the name)
-  id=anything   ignored; makes a URL unique so tests don't share counters
+Query parameters (combine freely; booleans are written =true):
+  size=N               file size in bytes (default 1048576)
+  seed=N               content seed (default: from the name)
+  no_range=true        ignore Range, always 200 with the whole file
+  chunked=true         no Content-Length (implies no_range)
+  throttle=N           per-connection limit, bytes/s
+  drop_pct=N           N% of responses are cut off after a random number of bytes
+  slow_from=N          responses starting at or after offset N ...
+  slow_rate=N          ... are limited to N bytes/s (slow tail, for hedging)
+  etag_change_after=N  after N requests the file changes (new ETag + bytes)
+  html_after=N         after N requests, an HTML "session expired" page (200)
+  conn_limit=N         more than N simultaneous downloads get 429 ...
+  retry_after=N        ... with Retry-After: N (default 1)
+  attachment=true      Content-Disposition: attachment with filename* (RFC 6266)
+  id=anything          ignored; makes a URL unique so tests don't share counters
+
+Example: /file/big.bin?size=1073741824&throttle=1000000

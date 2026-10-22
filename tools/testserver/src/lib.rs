@@ -6,13 +6,17 @@
 
 pub mod content;
 
+use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Path, Query};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Deserialize;
@@ -23,7 +27,7 @@ use tokio::time::Instant;
 const CHUNK: usize = 64 * 1024;
 
 /// Scenario switches, all optional. Unknown parameters (like `id=` to keep two
-/// tests apart) are ignored.
+/// tests apart) are ignored. Booleans are written `=true`.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Opts {
@@ -31,6 +35,28 @@ pub struct Opts {
     pub size: Option<u64>,
     /// Content seed (default: derived from the file name).
     pub seed: Option<u64>,
+    /// Ignore `Range` and always answer 200 with the whole file.
+    pub no_range: bool,
+    /// No `Content-Length` (chunked transfer); implies `no_range`.
+    pub chunked: bool,
+    /// Per-connection speed limit in bytes/s (0 = unlimited).
+    pub throttle: u64,
+    /// Percent of responses cut off after a random number of bytes.
+    pub drop_pct: u64,
+    /// Responses whose range starts at or after this offset...
+    pub slow_from: Option<u64>,
+    /// ...are throttled to this many bytes/s instead.
+    pub slow_rate: u64,
+    /// After this many requests the file "changes on the server" (new ETag and bytes).
+    pub etag_change_after: u64,
+    /// After this many requests, answer with an HTML error page (expired link).
+    pub html_after: u64,
+    /// More than this many simultaneous downloads of this URL get 429.
+    pub conn_limit: u64,
+    /// `Retry-After` seconds sent with 429 (default 1).
+    pub retry_after: Option<u64>,
+    /// Send `Content-Disposition: attachment` with an RFC 6266 `filename*`.
+    pub attachment: bool,
 }
 
 impl Opts {
@@ -39,11 +65,33 @@ impl Opts {
     }
 }
 
+/// Counters for one scenario URL, so "after N requests" switches work.
+#[derive(Default)]
+struct Counters {
+    requests: AtomicU64,
+    active: AtomicU64,
+}
+
+#[derive(Default)]
+struct Shared {
+    by_url: Mutex<HashMap<String, Arc<Counters>>>,
+}
+
+impl Shared {
+    fn counters(&self, key: &str) -> Arc<Counters> {
+        let mut map = self.by_url.lock().unwrap();
+        map.entry(key.to_owned()).or_default().clone()
+    }
+}
+
+type AppState = State<Arc<Shared>>;
+
 /// The router with every scenario route.
 pub fn router() -> Router {
     Router::new()
         .route("/", get(help))
         .route("/file/{name}", get(file))
+        .with_state(Arc::new(Shared::default()))
 }
 
 /// Serve on an already-bound listener until the process ends.
@@ -63,15 +111,64 @@ async fn help() -> &'static str {
     include_str!("help.txt")
 }
 
-async fn file(Path(name): Path<String>, Query(opts): Query<Opts>, req: HeaderMap) -> Response {
-    serve_file(&name, &opts, &req)
+async fn file(
+    State(shared): AppState,
+    Path(name): Path<String>,
+    Query(opts): Query<Opts>,
+    uri: Uri,
+    req: HeaderMap,
+) -> Response {
+    let key = uri.path_and_query().map_or("", |p| p.as_str());
+    serve_file(&shared.counters(key), &name, &opts, &req)
 }
 
-fn serve_file(name: &str, opts: &Opts, req: &HeaderMap) -> Response {
+/// Decrements the active-download count when the response body is dropped.
+struct Active(Arc<Counters>);
+
+impl Drop for Active {
+    fn drop(&mut self) {
+        self.0.active.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn serve_file(counters: &Arc<Counters>, name: &str, opts: &Opts, req: &HeaderMap) -> Response {
+    // n = 1 for the first request to this URL, 2 for the second, ...
+    let n = counters.requests.fetch_add(1, Ordering::SeqCst) + 1;
+
+    if opts.html_after > 0 && n > opts.html_after {
+        return (
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            "<!doctype html><title>Session expired</title><p>Please log in again.</p>",
+        )
+            .into_response();
+    }
+
+    let active = if opts.conn_limit > 0 {
+        let now = counters.active.fetch_add(1, Ordering::SeqCst) + 1;
+        let guard = Active(counters.clone());
+        if now > opts.conn_limit {
+            let wait = opts.retry_after.unwrap_or(1).to_string();
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                [(header::RETRY_AFTER, wait)],
+                "too many connections",
+            )
+                .into_response();
+        }
+        Some(guard)
+    } else {
+        None
+    };
+
     let size = opts.size();
-    let seed = content::file_seed(name, opts.seed, 0);
+    let version = u64::from(opts.etag_change_after > 0 && n > opts.etag_change_after);
+    let seed = content::file_seed(name, opts.seed, version);
     let etag = format!("\"{seed:016x}-{size:x}\"");
-    let last_modified = "Wed, 21 Oct 2026 10:00:00 GMT";
+    let last_modified = format!(
+        "{} Oct 2026 10:00:00 GMT",
+        ["Wed, 21", "Thu, 22"][version as usize]
+    );
+    let ranges = !opts.no_range && !opts.chunked;
 
     // If-Range: only honour Range when the client's validator still matches.
     // A mismatch means "the file changed since you started": send it all with 200.
@@ -82,14 +179,19 @@ fn serve_file(name: &str, opts: &Opts, req: &HeaderMap) -> Response {
     let range = req
         .get(header::RANGE)
         .and_then(|v| v.to_str().ok())
-        .filter(|_| validator_ok)
+        .filter(|_| ranges && validator_ok)
         .and_then(|v| parse_range(v, size));
 
     let mut res = Response::builder()
         .header(header::CONTENT_TYPE, "application/octet-stream")
-        .header(header::ACCEPT_RANGES, "bytes")
         .header(header::ETAG, &etag)
-        .header(header::LAST_MODIFIED, last_modified);
+        .header(header::LAST_MODIFIED, &last_modified);
+    if ranges {
+        res = res.header(header::ACCEPT_RANGES, "bytes");
+    }
+    if opts.attachment {
+        res = res.header(header::CONTENT_DISPOSITION, content_disposition(name));
+    }
 
     let (start, end) = match range {
         None if size == 0 => (0, 0),
@@ -109,9 +211,58 @@ fn serve_file(name: &str, opts: &Opts, req: &HeaderMap) -> Response {
         }
     };
     let len = if size == 0 { 0 } else { end - start + 1 };
-    res.header(header::CONTENT_LENGTH, HeaderValue::from(len))
-        .body(body(seed, start, len, 0))
-        .unwrap()
+    if !opts.chunked {
+        res = res.header(header::CONTENT_LENGTH, HeaderValue::from(len));
+    }
+
+    let rate = match opts.slow_from {
+        Some(from) if start >= from => opts.slow_rate,
+        _ => opts.throttle,
+    };
+    // Deterministic "random" per request, so a failing test fails the same way twice.
+    let r = content::splitmix64(content::fnv1a(name.as_bytes()) ^ n);
+    let cut_at = (len > 0 && r % 100 < opts.drop_pct).then(|| start + (r >> 8) % len);
+
+    res.body(body(Stream {
+        seed,
+        pos: start,
+        end: start + len,
+        rate,
+        cut_at,
+        sent: 0,
+        began: Instant::now(),
+        _active: active,
+    }))
+    .unwrap()
+}
+
+/// `attachment; filename="ascii fallback"; filename*=UTF-8''percent-encoded`
+fn content_disposition(name: &str) -> String {
+    let ascii: String = name
+        .chars()
+        .map(|c| match c {
+            '"' | '\\' => '_',
+            c if c == ' ' || c.is_ascii_graphic() => c,
+            _ => '_',
+        })
+        .collect();
+    format!(
+        "attachment; filename=\"{ascii}\"; filename*=UTF-8''{}",
+        pct_encode(name)
+    )
+}
+
+/// Percent-encode everything except RFC 3986 "unreserved" characters.
+fn pct_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+            out.push(b as char);
+        } else {
+            let _ = write!(out, "%{b:02X}");
+        }
+    }
+    out
 }
 
 /// Parse a single `bytes=` range against `size`.
@@ -142,29 +293,36 @@ pub fn parse_range(header: &str, size: u64) -> Option<Result<(u64, u64), ()>> {
     Some(Ok((start, end)))
 }
 
-/// Stream `len` bytes of file `seed` from `start`, at most `rate` bytes/s (0 = no limit).
-fn body(seed: u64, start: u64, len: u64, rate: u64) -> Body {
-    struct State {
-        seed: u64,
-        pos: u64,
-        end: u64,
-        rate: u64,
-        sent: u64,
-        began: Instant,
-    }
-    let state = State {
-        seed,
-        pos: start,
-        end: start + len,
-        rate,
-        sent: 0,
-        began: Instant::now(),
-    };
-    let stream = futures_util::stream::unfold(state, |mut s| async move {
+/// One response body being sent.
+struct Stream {
+    seed: u64,
+    pos: u64,
+    end: u64,
+    /// Bytes/s, 0 = unlimited.
+    rate: u64,
+    /// Fault injection: abort the connection when reaching this offset.
+    cut_at: Option<u64>,
+    sent: u64,
+    began: Instant,
+    _active: Option<Active>,
+}
+
+fn body(stream: Stream) -> Body {
+    Body::from_stream(futures_util::stream::unfold(stream, |mut s| async move {
         if s.pos >= s.end {
             return None;
         }
+        if s.cut_at.is_some_and(|cut| s.pos >= cut) {
+            // An error from the body stream makes the server drop the TCP connection
+            // mid-response, exactly like a flaky network or server.
+            s.end = s.pos;
+            let err = std::io::Error::other("fault injection: connection dropped");
+            return Some((Err(err), s));
+        }
         let mut n = (CHUNK as u64).min(s.end - s.pos);
+        if let Some(cut) = s.cut_at {
+            n = n.min(cut - s.pos);
+        }
         if s.rate > 0 {
             // Small writes (~20 per second) keep the throttle smooth; then wait
             // until the moment these bytes are "allowed" to leave.
@@ -175,14 +333,13 @@ fn body(seed: u64, start: u64, len: u64, rate: u64) -> Body {
         let chunk = content::bytes(s.seed, s.pos, n as usize);
         s.pos += n;
         s.sent += n;
-        Some((Ok::<_, std::io::Error>(chunk), s))
-    });
-    Body::from_stream(stream)
+        Some((Ok(chunk), s))
+    }))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_range;
+    use super::*;
 
     #[test]
     fn ranges() {
@@ -195,5 +352,14 @@ mod tests {
         assert_eq!(parse_range("bytes=0-1,5-9", 1000), None);
         assert_eq!(parse_range("items=0-1", 1000), None);
         assert_eq!(parse_range("bytes=abc", 1000), None);
+    }
+
+    #[test]
+    fn unicode_file_name_header() {
+        assert_eq!(
+            content_disposition("€ résumé.pdf"),
+            "attachment; filename=\"_ r_sum_.pdf\"; \
+             filename*=UTF-8''%E2%82%AC%20r%C3%A9sum%C3%A9.pdf"
+        );
     }
 }
