@@ -307,6 +307,12 @@ fn fresh_state(url: &str, headers: &[(String, String)], res: &Response) -> Resul
             false,
             header(res, CONTENT_LENGTH).and_then(|v| v.parse().ok()),
         ),
+        // `bytes=0-` of an empty file can't be satisfied: there is no byte 0.
+        StatusCode::RANGE_NOT_SATISFIABLE
+            if header(res, CONTENT_RANGE).is_some_and(|v| v.trim() == "bytes */0") =>
+        {
+            (false, Some(0))
+        }
         s => return Err(Error::Status(s)),
     };
     let mut state = State::new(url, headers.to_vec());
