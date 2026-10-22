@@ -137,8 +137,12 @@ async fn slow_tail() {
 #[tokio::test]
 async fn dropped_connection() {
     let base = server().await;
-    let res = get(&format!("{base}/file/a.bin?size=300000&drop_pct=100"), &[]).await;
-    assert!(res.bytes().await.is_err(), "body must be cut off");
+    let url = format!("{base}/file/a.bin?size=300000&drop_pct=100");
+    // Depending on buffering, the cut shows up while reading headers or the body.
+    match Client::new().get(url).send().await {
+        Err(_) => {}
+        Ok(res) => assert!(res.bytes().await.is_err(), "body must be cut off"),
+    }
 }
 
 #[tokio::test]

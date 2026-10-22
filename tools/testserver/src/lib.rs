@@ -277,7 +277,8 @@ fn serve_file(counters: &Arc<Counters>, name: &str, opts: &Opts, req: &HeaderMap
     };
     // Deterministic "random" per request, so a failing test fails the same way twice.
     let r = content::splitmix64(content::fnv1a(name.as_bytes()) ^ n);
-    let cut_at = (len > 0 && r % 100 < opts.drop_pct).then(|| start + (r >> 8) % len);
+    // The cut lands after at least one byte and before the last one.
+    let cut_at = (len > 1 && r % 100 < opts.drop_pct).then(|| start + 1 + (r >> 8) % (len - 1));
 
     res.body(body(Stream {
         seed,
