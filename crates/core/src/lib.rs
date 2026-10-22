@@ -1,6 +1,7 @@
 //! Slipstream's download engine: probing, segments, connections, storage and resume state.
 //! See `docs/SPEC-engine.md`.
 
+pub mod download;
 pub mod filename;
 pub mod state;
 pub mod storage;

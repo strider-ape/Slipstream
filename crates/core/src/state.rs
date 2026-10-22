@@ -67,6 +67,9 @@ pub struct State {
     /// Request headers to replay (cookies, referer, user agent...).
     pub headers: Vec<(String, String)>,
     pub validator: Validator,
+    /// `Content-Type` of the first answer (an HTML page later means "link expired").
+    #[serde(default)]
+    pub mime: Option<String>,
     /// Whether the server supports byte ranges (can resume / split).
     pub ranged: bool,
     pub segments: Vec<Segment>,
@@ -86,6 +89,7 @@ impl State {
             method: "GET".to_owned(),
             headers,
             validator: Validator::default(),
+            mime: None,
             ranged: false,
             segments: Vec::new(),
             created,
