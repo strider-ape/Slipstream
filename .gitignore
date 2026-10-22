@@ -11,3 +11,6 @@
 .idea/
 .DS_Store
 Thumbs.db
+
+# Claude local notes
+CLAUDE.local.md
