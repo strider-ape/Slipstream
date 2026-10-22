@@ -13,3 +13,4 @@ path = "src/main.rs"
 
 [dependencies]
 slipstream-core.workspace = true
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal"] }
