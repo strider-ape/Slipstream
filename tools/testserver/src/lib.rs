@@ -14,11 +14,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Router;
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::time::Instant;
@@ -91,8 +91,17 @@ pub fn router() -> Router {
     Router::new()
         .route("/", get(help))
         .route("/file/{name}", get(file))
+        .route("/protected/{name}", get(protected))
+        .route("/redirect/{hops}/{name}", get(redirect))
+        .route("/generate", post(generate))
         .with_state(Arc::new(Shared::default()))
 }
+
+/// Cookie that `/protected/...` wants, as a logged-in browser would send it.
+pub const SESSION_COOKIE: &str = "session=letmein";
+
+/// Size of the file `POST /generate` returns unless `?size=` says otherwise.
+pub const GENERATED_SIZE: u64 = 256 * 1024;
 
 /// Serve on an already-bound listener until the process ends.
 pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
@@ -120,6 +129,53 @@ async fn file(
 ) -> Response {
     let key = uri.path_and_query().map_or("", |p| p.as_str());
     serve_file(&shared.counters(key), &name, &opts, &req)
+}
+
+/// Like `/file`, but 403 unless the request carries [`SESSION_COOKIE`]
+/// (a download behind a login, handed over from the browser with its cookies).
+async fn protected(
+    state: AppState,
+    name: Path<String>,
+    opts: Query<Opts>,
+    uri: Uri,
+    req: HeaderMap,
+) -> Response {
+    let logged_in = req
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .any(|c| c.trim() == SESSION_COOKIE);
+    if !logged_in {
+        return (StatusCode::FORBIDDEN, "login required").into_response();
+    }
+    file(state, name, opts, uri, req).await
+}
+
+/// `/redirect/3/x` → `/redirect/2/x` → `/redirect/1/x` → `/file/x`, keeping the query.
+async fn redirect(Path((hops, name)): Path<(u32, String)>, uri: Uri) -> Response {
+    let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
+    let next = match hops {
+        0 | 1 => format!("/file/{}{query}", pct_encode(&name)),
+        n => format!("/redirect/{}/{}{query}", n - 1, pct_encode(&name)),
+    };
+    (StatusCode::FOUND, [(header::LOCATION, next)]).into_response()
+}
+
+/// A file that only exists as the answer to a form POST (think "export report").
+/// Its bytes depend on the request body, so a wrong or missing body is caught.
+async fn generate(
+    State(shared): AppState,
+    Query(mut opts): Query<Opts>,
+    uri: Uri,
+    req: HeaderMap,
+    form: Bytes,
+) -> Response {
+    opts.seed = Some(content::fnv1a(&form));
+    opts.size = Some(opts.size.unwrap_or(GENERATED_SIZE));
+    opts.attachment = true;
+    let key = uri.path_and_query().map_or("", |p| p.as_str());
+    serve_file(&shared.counters(key), "report.bin", &opts, &req)
 }
 
 /// Decrements the active-download count when the response body is dropped.

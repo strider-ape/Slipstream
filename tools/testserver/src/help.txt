@@ -2,7 +2,11 @@ Slipstream test server
 
 Every file is virtual: bytes are computed from their offset, so any size is free.
 
-GET /file/{name}            a file with Range, ETag, Last-Modified, If-Range
+GET  /file/{name}             a file with Range, ETag, Last-Modified, If-Range
+GET  /protected/{name}        same, but 403 without the cookie  session=letmein
+GET  /redirect/{hops}/{name}  302 chain of {hops} redirects ending at /file/{name}
+POST /generate                attachment whose bytes depend on the request body
+                              (256 KiB unless size= is given)
 
 Query parameters (combine freely; booleans are written =true):
   size=N               file size in bytes (default 1048576)
