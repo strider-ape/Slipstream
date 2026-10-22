@@ -1,0 +1,10 @@
+Slipstream test server
+
+Every file is virtual: bytes are computed from their offset, so any size is free.
+
+GET /file/{name}            a file with Range, ETag, Last-Modified, If-Range
+
+Query parameters (combine freely):
+  size=N        file size in bytes (default 1048576)
+  seed=N        content seed (default: from the name)
+  id=anything   ignored; makes a URL unique so tests don't share counters
