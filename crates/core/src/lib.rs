@@ -1,6 +1,8 @@
 //! Slipstream's download engine: probing, segments, connections, storage and resume state.
 //! See `docs/SPEC-engine.md`.
 
+pub mod filename;
+
 /// Version of the engine, shared by every Slipstream binary.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
