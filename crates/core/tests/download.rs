@@ -205,3 +205,11 @@ async fn empty_file() {
     assert_eq!(out.size, 0);
     assert_finished(&out, b"");
 }
+
+#[tokio::test]
+async fn network_errors_say_why() {
+    let dir = temp_dir("dns");
+    let req = request("https://no-such-host.invalid/file.bin".into(), &dir);
+    let err = run(&req).await.unwrap_err().to_string();
+    assert!(err.to_lowercase().contains("dns"), "{err}");
+}

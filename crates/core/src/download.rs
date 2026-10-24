@@ -91,7 +91,16 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::InvalidUrl(u) => write!(f, "not a valid http(s) URL: {u}"),
-            Error::Http(e) => write!(f, "network error: {e}"),
+            Error::Http(e) => {
+                write!(f, "network error: {e}")?;
+                // reqwest keeps the real cause (DNS, TLS, refused...) in the source chain.
+                let mut cause = std::error::Error::source(e);
+                while let Some(c) = cause {
+                    write!(f, ": {c}")?;
+                    cause = c.source();
+                }
+                Ok(())
+            }
             Error::Io(e) => write!(f, "disk error: {e}"),
             Error::Status(s) => write!(f, "server answered {s}"),
             Error::LinkExpired => write!(
