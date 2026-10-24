@@ -531,11 +531,6 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         let paths = Paths::new(Some(&home)).unwrap();
         let mut listener = Listener::bind(&paths).await.unwrap();
-        let again = Listener::bind(&paths).await;
-        assert_eq!(
-            again.err().map(|e| e.kind()),
-            Some(io::ErrorKind::AddrInUse)
-        );
 
         let server = tokio::spawn(async move {
             let (r, mut w) = tokio::io::split(listener.accept().await.unwrap());
@@ -551,6 +546,7 @@ mod tests {
             )
             .await
             .unwrap();
+            listener
         });
         let mut client = Client::connect(&paths).await.unwrap();
         let pong = client.call(&Request::Ping).await.unwrap();
@@ -561,6 +557,14 @@ mod tests {
                 protocol: PROTOCOL
             }
         );
-        server.await.unwrap();
+        let _listener = server.await.unwrap();
+
+        // A second listener on the same name is refused while the first one lives.
+        // (Checked last: its "is anyone there?" probe counts as a connection.)
+        let again = Listener::bind(&paths).await;
+        assert_eq!(
+            again.err().map(|e| e.kind()),
+            Some(io::ErrorKind::AddrInUse)
+        );
     }
 }
