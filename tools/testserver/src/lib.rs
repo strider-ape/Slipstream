@@ -209,8 +209,12 @@ fn serve_file(counters: &Arc<Counters>, name: &str, opts: &Opts, req: &HeaderMap
             let wait = opts.retry_after.unwrap_or(1).to_string();
             return (
                 StatusCode::TOO_MANY_REQUESTS,
-                [(header::RETRY_AFTER, wait)],
-                "too many connections",
+                [
+                    (header::RETRY_AFTER, wait),
+                    (header::CONTENT_TYPE, "text/html; charset=utf-8".to_owned()),
+                ],
+                // Real servers usually send their 429 as an HTML page.
+                "<!doctype html><title>429 Too Many Requests</title>",
             )
                 .into_response();
         }

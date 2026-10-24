@@ -446,7 +446,9 @@ async fn request(ctx: &Ctx, url: &str, from: u64, end: u64) -> Result<Response, 
             ctx.shared.lock().unwrap().state.final_url = res.url().to_string();
         }
     }
-    if is_html(header(&res, CONTENT_TYPE)) && !ctx.html_ok {
+    // Only a *successful* HTML answer is a login/expired page; error statuses
+    // (e.g. 429 "too many connections") often come as HTML too.
+    if res.status().is_success() && is_html(header(&res, CONTENT_TYPE)) && !ctx.html_ok {
         return Err(Fail::Fatal(Error::LinkExpired));
     }
     match res.status() {

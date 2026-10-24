@@ -469,7 +469,10 @@ async fn resume(client: &Client, mut state: State) -> Result<Resumed, Error> {
     }
 
     let is_html = |mime: Option<&str>| mime.is_some_and(|m| m.starts_with("text/html"));
-    if is_html(header(&res, CONTENT_TYPE)) && !is_html(state.mime.as_deref()) {
+    if res.status().is_success()
+        && is_html(header(&res, CONTENT_TYPE))
+        && !is_html(state.mime.as_deref())
+    {
         return Err(Error::LinkExpired);
     }
     match res.status() {
