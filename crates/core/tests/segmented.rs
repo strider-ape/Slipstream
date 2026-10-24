@@ -163,3 +163,23 @@ async fn one_connection_when_asked() {
     assert_eq!(peak, 1);
     assert_content(&out.unwrap(), "o.bin", 0, 3_000_000);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn full_line_gets_no_extra_connections_or_waste() {
+    // All connections share 4 MB/s, like a full home line: more can't help.
+    let (addr, stats) = testserver::spawn_with_stats().await.unwrap();
+    let dir = temp_dir("line");
+    let size = 12_000_000;
+    let req = request(
+        format!("http://{addr}/file/f.bin?size={size}&total_rate=4000000"),
+        &dir,
+    );
+    let began = Instant::now();
+    let (out, peak) = run(&req).await;
+    let took = began.elapsed();
+    assert_content(&out.unwrap(), "f.bin", 0, size as usize);
+    assert!(peak <= 2, "kept adding connections: peak {peak}");
+    let waste = stats.bytes_sent().saturating_sub(size);
+    assert!(waste < size / 20, "fetched {waste} bytes twice");
+    assert!(took < Duration::from_secs(4), "took {took:?}"); // 12 MB at 4 MB/s = 3 s
+}

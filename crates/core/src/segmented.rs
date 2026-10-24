@@ -4,7 +4,7 @@
 //! worker task that streams one byte range into the shared part file. All the
 //! bookkeeping (segments, connections, backoff) sits behind one short-held mutex.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
@@ -25,6 +25,10 @@ const TICK: Duration = Duration::from_millis(250);
 const SAVE_EVERY: Duration = Duration::from_secs(2);
 /// Connections double at most this often.
 const RAMP_EVERY: Duration = Duration::from_secs(1);
+/// A doubling must raise the speed by this factor, or it is undone.
+const PAYOFF: f64 = 1.15;
+/// Race a slow (not stalled) connection only if that should finish this much sooner, in s.
+const TAIL_GAIN: f64 = 2.0;
 /// Tries per segment before giving up on the download.
 const MAX_TRIES: u32 = 10;
 /// A connection with no data for this long gets raced by a fresh one.
@@ -157,6 +161,10 @@ pub(crate) async fn run(
 
     let mut tick = tokio::time::interval(TICK);
     let (mut last_save, mut last_ramp) = (Instant::now(), Instant::now());
+    // After a doubling: (connections before, speed before), until judged.
+    let mut ramp_check: Option<(usize, f64)> = None;
+    // (time, bytes) samples of about the last second, for an honest average.
+    let mut recent: VecDeque<(Instant, u64)> = VecDeque::new();
     let (mut speed, mut last_bytes, mut last_at) = (0.0, state.downloaded(), Instant::now());
     let result = loop {
         // Fill free slots: orphaned segments first, then races, then splits.
@@ -240,13 +248,35 @@ pub(crate) async fn run(
                     speed = 0.7 * speed + 0.3 * instant;
                 }
                 (last_bytes, last_at) = (downloaded, now);
+                recent.push_back((now, downloaded));
+                while recent.len() > 1 && now.duration_since(recent[1].0) >= RAMP_EVERY {
+                    recent.pop_front();
+                }
+                let (t0, b0) = recent[0];
+                // Plain average over ~1 s: the smoothed `speed` lags and would make a
+                // useless doubling look like a gain.
+                let rate = downloaded.saturating_sub(b0) as f64
+                    / now.duration_since(t0).as_secs_f64().max(0.001);
 
                 // Ramp-up: double the connections while every one is busy and
                 // we're not yet near the speed limit.
-                let under_limit = job.limit == 0 || speed < 0.85 * job.limit as f64;
-                if allowed < max_conn && workers.len() >= allowed && all_receiving
-                    && now.duration_since(last_ramp) >= RAMP_EVERY && under_limit
+                // Did the last doubling pay off? Judge a second later: if speed rose by
+                // less than PAYOFF, the line (or the server) is the limit, so step back
+                // and stop adding connections that would only split the same bandwidth.
+                if let Some((before_conns, before_speed)) = ramp_check
+                    && now.duration_since(last_ramp) >= RAMP_EVERY
                 {
+                    ramp_check = None;
+                    if rate < before_speed * PAYOFF {
+                        allowed = before_conns;
+                        max_conn = before_conns;
+                    }
+                }
+                let under_limit = job.limit == 0 || speed < 0.85 * job.limit as f64;
+                if ramp_check.is_none() && allowed < max_conn && workers.len() >= allowed
+                    && all_receiving && now.duration_since(last_ramp) >= RAMP_EVERY && under_limit
+                {
+                    ramp_check = Some((allowed, rate));
                     allowed = (allowed * 2).min(max_conn);
                     last_ramp = now;
                 }
@@ -344,7 +374,8 @@ fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<u32> {
     }
 
     // 4. Nothing worth splitting: race a connection that is far slower than the
-    //    best one and would hold up the finish (the slow tail).
+    //    best one and would hold up the finish (the slow tail). Racing fetches
+    //    bytes twice, so only do it when it saves real time.
     let fastest = sh.conns.values().map(|c| c.speed(now)).fold(0.0, f64::max);
     let slow = sh.conns.values().find(|c| {
         let s = c.speed(now);
@@ -353,7 +384,7 @@ fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<u32> {
             && c.first_byte
                 .is_some_and(|t| now.duration_since(t) >= RAMP_EVERY)
             && s * 4.0 < fastest
-            && rem > s * 2.0
+            && rem / s.max(1.0) - rem / fastest >= TAIL_GAIN
     });
     slow.map(|c| c.seg)
 }
