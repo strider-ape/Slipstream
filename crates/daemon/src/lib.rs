@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use slipstream_core::download::{self, Error as DownloadError, Outcome, Progress};
 use slipstream_core::ipc::{
-    self, AddRequest, DownloadInfo, Listener, Paths, Request, Response, Status, Stream,
+    self, AddRequest, CaptureSettings, DownloadInfo, Listener, Paths, Request, Response, Status,
+    Stream,
 };
 use slipstream_core::storage::{part_path, sidecar_path};
 use tokio::io::BufReader;
@@ -34,7 +35,7 @@ pub async fn run(paths: &Paths) -> io::Result<()> {
     let daemon = Arc::new(Daemon {
         db: Mutex::new(db),
         running: Mutex::default(),
-        default_dir: Paths::downloads_dir(),
+        default_dir: paths.downloads.clone(),
         shutdown: Notify::new(),
     });
 
@@ -134,8 +135,17 @@ impl Daemon {
                 self.shutdown.notify_one();
                 Ok(Response::Ok)
             }
+            Request::CaptureSettings => Ok(Response::CaptureSettings(self.capture_settings())),
         };
         result.unwrap_or_else(|message| Response::Error { message })
+    }
+
+    /// Saved capture rules (`settings` key "capture"), or the defaults.
+    fn capture_settings(&self) -> CaptureSettings {
+        let saved = self.db().setting("capture").ok().flatten();
+        saved
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default()
     }
 
     fn add(self: &Arc<Self>, req: AddRequest) -> Result<Response, String> {

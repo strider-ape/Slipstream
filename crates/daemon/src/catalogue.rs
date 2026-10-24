@@ -142,6 +142,23 @@ impl Catalogue {
         Ok(())
     }
 
+    pub fn setting(&self, key: &str) -> rusqlite::Result<Option<String>> {
+        self.db
+            .query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        self.db.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [key, value],
+        )?;
+        Ok(())
+    }
+
     pub fn remove(&self, id: i64) -> rusqlite::Result<bool> {
         Ok(self
             .db
@@ -190,6 +207,14 @@ mod tests {
             (Some("a.zip"), Some(100), 40)
         );
         assert_eq!(c.ids_with_status(&[Status::Paused]).unwrap(), vec![id]);
+
+        assert_eq!(c.setting("capture").unwrap(), None);
+        c.set_setting("capture", "{}").unwrap();
+        c.set_setting("capture", "{\"enabled\":false}").unwrap();
+        assert_eq!(
+            c.setting("capture").unwrap().as_deref(),
+            Some("{\"enabled\":false}")
+        );
 
         assert!(c.remove(id).unwrap());
         assert!(c.list().unwrap().is_empty());
