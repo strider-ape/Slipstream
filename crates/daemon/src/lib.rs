@@ -221,7 +221,10 @@ impl Daemon {
     }
 
     async fn pause(&self, id: i64) -> Result<Response, String> {
-        match self.db().status(id).map_err(|e| e.to_string())? {
+        // Read the status first: a lock taken in a `match` header is held for the
+        // whole match, and the arms need the database again.
+        let status = self.db().status(id).map_err(|e| e.to_string())?;
+        match status {
             None => return Err(format!("no download #{id}")),
             Some(Status::Queued | Status::Downloading) => {}
             Some(s) => return Err(format!("#{id} is {}", s.as_str())),
@@ -234,7 +237,10 @@ impl Daemon {
     }
 
     fn resume(self: &Arc<Self>, id: i64) -> Result<Response, String> {
-        match self.db().status(id).map_err(|e| e.to_string())? {
+        // Read the status first: a lock taken in a `match` header is held for the
+        // whole match, and the arms need the database again.
+        let status = self.db().status(id).map_err(|e| e.to_string())?;
+        match status {
             None => Err(format!("no download #{id}")),
             Some(Status::Paused | Status::Error) => {
                 self.start(id);
