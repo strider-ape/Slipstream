@@ -18,6 +18,7 @@ Query parameters (combine freely; booleans are written =true):
   slow_from=N          responses starting at or after offset N ...
   slow_rate=N          ... are limited to N bytes/s (slow tail, for hedging)
   slow_count=N         only the first N of those are slow (one bad connection)
+  total_rate=N         all connections to this URL share N bytes/s (a full line)
   etag_change_after=N  after N requests the file changes (new ETag + bytes)
   html_after=N         after N requests, an HTML "session expired" page (200)
   conn_limit=N         more than N simultaneous downloads get 429 ...

@@ -49,6 +49,8 @@ pub struct Opts {
     pub slow_rate: u64,
     /// Only the first N such responses are slow (one bad connection), default all.
     pub slow_count: Option<u64>,
+    /// Total bytes/s for all connections to this URL together (a full line).
+    pub total_rate: u64,
     /// After this many requests the file "changes on the server" (new ETag and bytes).
     pub etag_change_after: u64,
     /// After this many requests, answer with an HTML error page (expired link).
@@ -73,6 +75,24 @@ struct Counters {
     requests: AtomicU64,
     active: AtomicU64,
     slow: AtomicU64,
+    /// Body bytes sent for this URL (tests check nothing is downloaded twice).
+    sent: AtomicU64,
+    /// Shared token bucket for `total_rate`: (tokens, last refill).
+    line: Mutex<Option<(f64, std::time::Instant)>>,
+}
+
+impl Counters {
+    /// How long to wait before `n` more bytes fit through the shared "line".
+    fn take_line(&self, n: u64, rate: u64) -> Duration {
+        let mut line = self.line.lock().unwrap();
+        let now = std::time::Instant::now();
+        let (tokens, last) = line.get_or_insert((0.0, now));
+        let refill = rate as f64 * now.duration_since(*last).as_secs_f64();
+        *tokens = (*tokens + refill).min(rate as f64 / 20.0);
+        *last = now;
+        *tokens -= n as f64;
+        Duration::from_secs_f64((-*tokens).max(0.0) / rate as f64)
+    }
 }
 
 #[derive(Default)]
@@ -91,13 +111,17 @@ type AppState = State<Arc<Shared>>;
 
 /// The router with every scenario route.
 pub fn router() -> Router {
+    router_with(Arc::default())
+}
+
+fn router_with(shared: Arc<Shared>) -> Router {
     Router::new()
         .route("/", get(help))
         .route("/file/{name}", get(file))
         .route("/protected/{name}", get(protected))
         .route("/redirect/{hops}/{name}", get(redirect))
         .route("/generate", post(generate))
-        .with_state(Arc::new(Shared::default()))
+        .with_state(shared)
 }
 
 /// Cookie that `/protected/...` wants, as a logged-in browser would send it.
@@ -117,6 +141,28 @@ pub async fn spawn() -> std::io::Result<SocketAddr> {
     let addr = listener.local_addr()?;
     tokio::spawn(serve(listener));
     Ok(addr)
+}
+
+/// Read-only view of what a spawned server sent.
+#[derive(Clone)]
+pub struct Stats(Arc<Shared>);
+
+impl Stats {
+    /// Body bytes sent so far, over all URLs.
+    pub fn bytes_sent(&self) -> u64 {
+        let map = self.0.by_url.lock().unwrap();
+        map.values().map(|c| c.sent.load(Ordering::SeqCst)).sum()
+    }
+}
+
+/// Like [`spawn`], plus a [`Stats`] handle.
+pub async fn spawn_with_stats() -> std::io::Result<(SocketAddr, Stats)> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let shared = Arc::new(Shared::default());
+    let app = router_with(shared.clone());
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    Ok((addr, Stats(shared)))
 }
 
 async fn help() -> &'static str {
@@ -297,6 +343,8 @@ fn serve_file(counters: &Arc<Counters>, name: &str, opts: &Opts, req: &HeaderMap
         sent: 0,
         began: Instant::now(),
         _active: active,
+        counters: counters.clone(),
+        total_rate: opts.total_rate,
     }))
     .unwrap()
 }
@@ -370,6 +418,9 @@ struct Stream {
     sent: u64,
     began: Instant,
     _active: Option<Active>,
+    counters: Arc<Counters>,
+    /// Bytes/s shared by every response of this URL, 0 = unlimited.
+    total_rate: u64,
 }
 
 fn body(stream: Stream) -> Body {
@@ -395,7 +446,16 @@ fn body(stream: Stream) -> Body {
             let due = s.began + Duration::from_secs_f64((s.sent + n) as f64 / s.rate as f64);
             tokio::time::sleep_until(due).await;
         }
+        if s.total_rate > 0 {
+            // One bucket for all connections to this URL: a full internet line.
+            n = n.min((s.total_rate / 20).max(1024));
+            let wait = s.counters.take_line(n, s.total_rate);
+            if !wait.is_zero() {
+                tokio::time::sleep(wait).await;
+            }
+        }
         let chunk = content::bytes(s.seed, s.pos, n as usize);
+        s.counters.sent.fetch_add(n, Ordering::SeqCst);
         s.pos += n;
         s.sent += n;
         Some((Ok(chunk), s))
