@@ -204,6 +204,7 @@ fn no_home() -> io::Error {
     io::Error::new(io::ErrorKind::NotFound, "no home folder")
 }
 
+#[cfg(windows)]
 fn fnv1a(data: &[u8]) -> u64 {
     data.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
         (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
