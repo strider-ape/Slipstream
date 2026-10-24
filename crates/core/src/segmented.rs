@@ -325,7 +325,12 @@ pub(crate) async fn run(
                     last_ramp = now;
                     ramped_once = true;
                 }
-                on_progress(Progress { downloaded, size: Some(ctx.size), connections: workers.len() });
+                on_progress(Progress {
+                    downloaded,
+                    size: Some(ctx.size),
+                    connections: workers.len(),
+                    name: None,
+                });
                 if now.duration_since(last_save) >= SAVE_EVERY {
                     if let Err(e) = save(&ctx, job.sidecar) {
                         break Err(End::Failed(e));

@@ -3,6 +3,7 @@
 
 pub mod download;
 pub mod filename;
+pub mod ipc;
 mod limiter;
 mod segmented;
 pub mod state;

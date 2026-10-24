@@ -41,12 +41,14 @@ pub struct Request {
     pub speed_limit: u64,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Progress {
     pub downloaded: u64,
     pub size: Option<u64>,
     /// Connections currently downloading.
     pub connections: usize,
+    /// File name being written (set once the name is decided).
+    pub name: Option<String>,
 }
 
 #[derive(Debug)]
@@ -184,6 +186,14 @@ pub async fn download(
 
     let part_file = part_path(&target);
     let sidecar = sidecar_path(&target);
+    // From here on every progress report carries the file name.
+    let file_name = target.file_name().map(|n| n.to_string_lossy().into_owned());
+    let mut on_progress = move |p: Progress| {
+        on_progress(Progress {
+            name: file_name.clone(),
+            ..p
+        })
+    };
     tokio::pin!(cancel);
     let mut restarts = 0;
     let part = loop {
@@ -270,6 +280,7 @@ pub async fn download(
         downloaded: state.downloaded(),
         size: state.validator.size,
         connections: 0,
+        name: None,
     });
 
     // Finalize: everything is on disk → check the size, rename, drop the sidecar.
@@ -545,6 +556,7 @@ async fn receive(
                 downloaded: state.downloaded(),
                 size: state.validator.size,
                 connections: 1,
+                name: None,
             });
             last_tick = Instant::now();
         }
