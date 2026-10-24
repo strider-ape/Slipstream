@@ -55,6 +55,8 @@ pub async fn run(paths: &Paths) -> io::Result<()> {
                 }
                 Err(e) => eprintln!("slipstream-daemon: accept failed: {e}"),
             },
+            // Collect finished client tasks so they don't pile up.
+            Some(_) = clients.join_next() => {}
             () = daemon.shutdown.notified() => break,
             () = terminated() => break,
         }
