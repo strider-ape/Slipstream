@@ -1,9 +1,9 @@
-# Slipstream
+﻿# Slipstream
 
 A light, fast, open-source download manager for **Windows and Linux**, written in Rust.
 
-**Status:** early development. M2 done: single-connection downloads that survive `kill -9`
-and resume byte-exact (`scripts/crash-test.sh`). Next: M3, many connections per file.
+**Status:** early development. M3 done: up to 8 connections per file with dynamic splitting,
+slow-tail racing, retries and a speed limit; resumes byte-exact after `kill -9`. See [benchmarks](docs/benchmarks.md).
 
 ## Try it
 ```
