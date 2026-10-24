@@ -1,44 +1,92 @@
 //! Slipstream command-line client.
 
 use std::io::Write;
-use std::process::ExitCode;
-use std::time::Instant;
+use std::path::PathBuf;
+use std::process::{ExitCode, Stdio};
+use std::time::{Duration, Instant};
 
 use slipstream_core::download::{self, Error, Progress, Request};
+use slipstream_core::ipc::{self, AddRequest, Client, DownloadInfo, Paths, Response};
 
 const USAGE: &str = "\
-usage: slipstream get URL [options]
+usage:
+  slipstream get URL [options]      download right here, in this window
+  slipstream add URL [options]      hand the download to the background daemon
+  slipstream list                   the daemon's downloads
+  slipstream watch                  live view of the daemon's downloads (Ctrl+C to quit)
+  slipstream pause ID | resume ID
+  slipstream remove ID [--delete-file]
+  slipstream daemon status | stop
+  slipstream autostart on | off     start the daemon when you log in
 
-options:
-  -d, --dir DIR          folder to save into (default: the current folder)
+options for get and add:
+  -d, --dir DIR          folder to save into (get: this folder; add: your Downloads folder)
   -o, --output NAME      file name (default: from the server)
   -c, --connections N    most connections per file (default 8)
   -l, --limit RATE       speed limit in bytes/s, e.g. 500K or 2M (default none)
   -H, --header 'K: V'    extra request header, repeatable (e.g. 'Cookie: a=b')
 
-Run the same command again to resume an interrupted download.";
+`get` resumes when you run the same command again; the daemon resumes on its own.";
 
 #[tokio::main]
 async fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let req = match args.first().map(String::as_str) {
-        Some("get") => match parse_get(&args[1..]) {
-            Ok(req) => req,
-            Err(e) => {
-                eprintln!("{e}\n\n{USAGE}");
-                return ExitCode::from(2);
-            }
+    let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    let id = |s: &str| {
+        s.parse::<i64>()
+            .map_err(|_| format!("not a download number: {s}"))
+    };
+    let result = match words[..] {
+        ["get", ..] => return get(&args[1..]).await,
+        ["add", ..] => add(&args[1..]).await,
+        ["list"] => list().await,
+        ["watch"] => watch().await,
+        ["pause", n] => match id(n) {
+            Ok(id) => command(ipc::Request::Pause { id }, &format!("Paused #{id}")).await,
+            Err(e) => Err(e),
         },
-        Some("-V" | "--version") => {
+        ["resume", n] => match id(n) {
+            Ok(id) => command(ipc::Request::Resume { id }, &format!("Resumed #{id}")).await,
+            Err(e) => Err(e),
+        },
+        ["remove", n] | ["remove", n, "--delete-file"] => match id(n) {
+            Ok(id) => {
+                let delete_file = words.len() == 3;
+                let req = ipc::Request::Remove { id, delete_file };
+                command(req, &format!("Removed #{id}")).await
+            }
+            Err(e) => Err(e),
+        },
+        ["daemon", "status"] => daemon_status().await,
+        ["daemon", "stop"] => command(ipc::Request::Shutdown, "Daemon stopping").await,
+        ["autostart", on @ ("on" | "off")] => autostart(on),
+        ["-V" | "--version"] => {
             println!("slipstream {}", slipstream_core::VERSION);
-            return ExitCode::SUCCESS;
+            Ok(())
         }
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
         }
     };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
 
+/// `get`: download in this process, with a progress line.
+async fn get(args: &[String]) -> ExitCode {
+    let req = match parse_get(args) {
+        Ok(req) => req,
+        Err(e) => {
+            eprintln!("{e}\n\n{USAGE}");
+            return ExitCode::from(2);
+        }
+    };
     let mut meter = Meter::new();
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
@@ -62,6 +110,222 @@ async fn main() -> ExitCode {
         Err(e) => {
             eprintln!("error: {e}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// `add`: hand a download to the daemon (starting it if needed).
+async fn add(args: &[String]) -> Result<(), String> {
+    let explicit_dir = args.iter().any(|a| a == "-d" || a == "--dir");
+    let r = parse_get(args)?;
+    // The daemon has its own working folder, so send an absolute path.
+    let dir = explicit_dir.then(|| match r.dir.is_absolute() {
+        true => r.dir.clone(),
+        false => std::env::current_dir().unwrap_or_default().join(&r.dir),
+    });
+    let req = AddRequest {
+        url: r.url,
+        dir,
+        name: r.name,
+        headers: r.headers,
+        connections: r.connections,
+        speed_limit: r.speed_limit,
+    };
+    let mut client = connect_or_start().await?;
+    match call(&mut client, ipc::Request::Add(req)).await? {
+        Response::Added { id } => {
+            println!("Added #{id}. Follow it with: slipstream watch");
+            Ok(())
+        }
+        other => Err(describe(other)),
+    }
+}
+
+async fn list() -> Result<(), String> {
+    let mut client = connect().await?;
+    match call(&mut client, ipc::Request::List).await? {
+        Response::Downloads { downloads } => {
+            print_table(&downloads);
+            Ok(())
+        }
+        other => Err(describe(other)),
+    }
+}
+
+/// Redraw the list every time the daemon sends a fresh one.
+async fn watch() -> Result<(), String> {
+    let mut client = connect().await?;
+    let mut msg = call(&mut client, ipc::Request::Watch).await?;
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+    loop {
+        if let Response::Downloads { downloads } = &msg {
+            // Clear the screen and go to the top-left corner.
+            print!("\x1b[2J\x1b[H");
+            print_table(downloads);
+            println!("\n(Ctrl+C to stop watching; downloads keep going)");
+        }
+        msg = tokio::select! {
+            m = client.next() => match m.map_err(|e| e.to_string())? {
+                Some(m) => m,
+                None => return Err("the daemon stopped".into()),
+            },
+            _ = &mut ctrl_c => return Ok(()),
+        };
+    }
+}
+
+/// Send one command that answers `Ok`, and print `done`.
+async fn command(req: ipc::Request, done: &str) -> Result<(), String> {
+    let mut client = connect().await?;
+    match call(&mut client, req).await? {
+        Response::Ok => {
+            println!("{done}");
+            Ok(())
+        }
+        other => Err(describe(other)),
+    }
+}
+
+async fn daemon_status() -> Result<(), String> {
+    let paths = Paths::from_env().map_err(|e| e.to_string())?;
+    match Client::connect(&paths).await {
+        Ok(mut client) => match call(&mut client, ipc::Request::Ping).await? {
+            Response::Pong { version, .. } => {
+                println!(
+                    "running (version {version}), data in {}",
+                    paths.data_dir.display()
+                );
+                Ok(())
+            }
+            other => Err(describe(other)),
+        },
+        Err(_) => {
+            println!("not running");
+            Ok(())
+        }
+    }
+}
+
+fn autostart(on: &str) -> Result<(), String> {
+    let status = std::process::Command::new(daemon_exe())
+        .args(["--autostart", on])
+        .status()
+        .map_err(|e| format!("could not run {}: {e}", daemon_exe().display()))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "changing autostart failed".into())
+}
+
+async fn call(client: &mut Client, req: ipc::Request) -> Result<Response, String> {
+    client
+        .call(&req)
+        .await
+        .map_err(|e| format!("lost the daemon: {e}"))
+}
+
+fn describe(response: Response) -> String {
+    match response {
+        Response::Error { message } => message,
+        other => format!("unexpected answer: {other:?}"),
+    }
+}
+
+async fn connect() -> Result<Client, String> {
+    let paths = Paths::from_env().map_err(|e| e.to_string())?;
+    Client::connect(&paths)
+        .await
+        .map_err(|_| "the daemon is not running (`slipstream add URL` starts it)".into())
+}
+
+/// Connect, starting the daemon in the background first if it isn't running.
+async fn connect_or_start() -> Result<Client, String> {
+    let paths = Paths::from_env().map_err(|e| e.to_string())?;
+    if let Ok(client) = Client::connect(&paths).await {
+        return Ok(client);
+    }
+    spawn_daemon(&paths)?;
+    for _ in 0..100 {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        if let Ok(client) = Client::connect(&paths).await {
+            return Ok(client);
+        }
+    }
+    let log = paths.data_dir.join("daemon.log");
+    Err(format!(
+        "started the daemon but it doesn't answer; see {}",
+        log.display()
+    ))
+}
+
+/// The daemon binary sits next to this one.
+fn daemon_exe() -> PathBuf {
+    let me = std::env::current_exe().unwrap_or_default();
+    me.with_file_name(format!("slipstream-daemon{}", std::env::consts::EXE_SUFFIX))
+}
+
+/// Start the daemon detached from this terminal, logging to `daemon.log`.
+fn spawn_daemon(paths: &Paths) -> Result<(), String> {
+    let exe = daemon_exe();
+    std::fs::create_dir_all(&paths.data_dir).map_err(|e| e.to_string())?;
+    let log = std::fs::File::options()
+        .create(true)
+        .append(true)
+        .open(paths.data_dir.join("daemon.log"))
+        .map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.stdin(Stdio::null())
+        .stdout(log.try_clone().map_err(|e| e.to_string())?)
+        .stderr(log);
+    #[cfg(unix)]
+    {
+        // Own process group: closing this terminal doesn't take the daemon with it.
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0800_0000);
+    }
+    cmd.spawn()
+        .map(drop)
+        .map_err(|e| format!("could not start {}: {e}", exe.display()))
+}
+
+fn print_table(downloads: &[DownloadInfo]) {
+    if downloads.is_empty() {
+        println!("No downloads.");
+        return;
+    }
+    println!(
+        "{:>4}  {:<11} {:>5}  {:>10}  {:>11}  NAME",
+        "ID", "STATUS", "DONE", "SIZE", "SPEED"
+    );
+    for d in downloads {
+        let done = match d.size {
+            Some(size) if size > 0 => format!("{}%", d.downloaded * 100 / size),
+            _ => String::new(),
+        };
+        let speed = if d.speed > 0 {
+            format!("{}/s", human(d.speed))
+        } else {
+            String::new()
+        };
+        let mut name = d.name.clone().unwrap_or_else(|| d.url.clone());
+        if d.connections > 0 {
+            name += &format!("  ({} conn)", d.connections);
+        }
+        let size = d.size.map(human).unwrap_or_default();
+        let status = d.status.as_str();
+        println!(
+            "{:>4}  {status:<11} {done:>5}  {size:>10}  {speed:>11}  {name}",
+            d.id
+        );
+        if let Some(error) = &d.error {
+            println!("      {error}");
         }
     }
 }
