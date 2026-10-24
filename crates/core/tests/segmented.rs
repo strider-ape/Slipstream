@@ -89,7 +89,7 @@ async fn survives_dropped_connections() {
 async fn file_changed_mid_download_restarts_cleanly() {
     let (base, dir) = (server().await, temp_dir("changed"));
     let req = request(
-        format!("{base}/file/v.bin?size=8000000&throttle=2000000&etag_change_after=2"),
+        format!("{base}/file/v.bin?size=8000000&throttle=2000000&etag_change_after=1"),
         &dir,
     );
     let (out, _) = run(&req).await;
