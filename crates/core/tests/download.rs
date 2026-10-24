@@ -24,6 +24,7 @@ fn request(url: String, dir: &Path) -> Request {
     Request {
         url,
         dir: dir.to_owned(),
+        connections: 1,
         ..Default::default()
     }
 }
