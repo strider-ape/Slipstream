@@ -32,3 +32,5 @@ Crate package names are prefixed `slipstream-` (e.g. `slipstream-core`); the CLI
 ## Commands
 - Build/test: `cargo build --workspace`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all --check`
 - Test server: `cargo run -p testserver`
+- Real crash/resume check (Linux/WSL): `scripts/crash-test.sh`
+- On the user's Windows laptop, built programs can't run (Smart App Control), so build and test inside WSL2 Ubuntu (`~/src/Slipstream`); CI covers Windows.
