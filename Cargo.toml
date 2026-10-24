@@ -1,5 +1,7 @@
 [workspace]
 resolver = "3"
+# Throwaway UI prototypes build on their own (not in CI or releases).
+exclude = ["prototypes"]
 members = [
     "crates/core",
     "crates/daemon",

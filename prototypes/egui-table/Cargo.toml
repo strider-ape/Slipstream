@@ -1,0 +1,17 @@
+[package]
+name = "proto-egui"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+eframe = "0.37.0"
+egui_extras = "0.37.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+# Standalone: not part of the main workspace.
+[workspace]
