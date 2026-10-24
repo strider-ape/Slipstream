@@ -36,6 +36,36 @@ pub enum Request {
     /// Stream a `Downloads` snapshot twice a second until the client hangs up.
     Watch,
     Shutdown,
+    /// What the browser extension should catch (sent to it on connect).
+    CaptureSettings,
+}
+
+/// Rules for which browser downloads Slipstream catches. Kept by the daemon and
+/// pushed to the extension, so changing them never needs an extension update
+/// (SPEC-browser-capture §4). Field names match the extension protocol.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureSettings {
+    /// File extensions to catch (lowercase, no dot).
+    pub capture_ext: Vec<String>,
+    /// Hosts never caught; `*.example.com` matches subdomains.
+    pub exclude_hosts: Vec<String>,
+    /// Don't catch files smaller than this many bytes (when the size is known).
+    pub min_size: u64,
+    pub enabled: bool,
+}
+
+impl Default for CaptureSettings {
+    fn default() -> Self {
+        let ext = "zip rar 7z tar gz tgz xz bz2 zst iso img exe msi msix apk deb rpm appimage \
+                   dmg pkg bin mp4 mkv avi mov webm mp3 flac wav m4a pdf epub torrent";
+        Self {
+            capture_ext: ext.split_whitespace().map(str::to_owned).collect(),
+            exclude_hosts: Vec::new(),
+            min_size: 0,
+            enabled: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -66,6 +96,7 @@ pub enum Response {
     Downloads { downloads: Vec<DownloadInfo> },
     Ok,
     Error { message: String },
+    CaptureSettings(CaptureSettings),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +156,8 @@ pub struct Paths {
     pub data_dir: PathBuf,
     /// Unix socket path, or Windows pipe name.
     pub endpoint: String,
+    /// Where downloads go when the request names no folder.
+    pub downloads: PathBuf,
 }
 
 impl Paths {
@@ -142,6 +175,7 @@ impl Paths {
             return Ok(Self {
                 data_dir: home.to_owned(),
                 endpoint,
+                downloads: home.join("Downloads"),
             });
         }
         Self::per_user()
@@ -166,6 +200,7 @@ impl Paths {
         Ok(Self {
             data_dir: data,
             endpoint,
+            downloads: user_downloads(),
         })
     }
 
@@ -179,19 +214,20 @@ impl Paths {
         Ok(Self {
             data_dir: data,
             endpoint,
+            downloads: user_downloads(),
         })
     }
+}
 
-    /// The user's Downloads folder, the default place to save.
-    pub fn downloads_dir() -> PathBuf {
-        #[cfg(unix)]
-        let home = std::env::var_os("HOME");
-        #[cfg(windows)]
-        let home = std::env::var_os("USERPROFILE");
-        home.map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir)
-            .join("Downloads")
-    }
+/// The user's Downloads folder.
+fn user_downloads() -> PathBuf {
+    #[cfg(unix)]
+    let home = std::env::var_os("HOME");
+    #[cfg(windows)]
+    let home = std::env::var_os("USERPROFILE");
+    home.map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("Downloads")
 }
 
 fn env_path(key: &str) -> Option<PathBuf> {
@@ -262,6 +298,67 @@ impl Client {
     pub async fn next(&mut self) -> io::Result<Option<Response>> {
         recv(&mut self.reader).await
     }
+
+    /// Connect, starting the daemon in the background first if it isn't running.
+    pub async fn connect_or_start(paths: &Paths) -> io::Result<Self> {
+        if let Ok(client) = Self::connect(paths).await {
+            return Ok(client);
+        }
+        spawn_daemon(paths)?;
+        for _ in 0..100 {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            if let Ok(client) = Self::connect(paths).await {
+                return Ok(client);
+            }
+        }
+        let log = paths.data_dir.join("daemon.log");
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "started the daemon but it doesn't answer; see {}",
+                log.display()
+            ),
+        ))
+    }
+}
+
+/// The daemon program: `$SLIPSTREAM_DAEMON`, else `slipstream-daemon` next to this one.
+pub fn daemon_exe() -> PathBuf {
+    env_path("SLIPSTREAM_DAEMON").unwrap_or_else(|| {
+        let me = std::env::current_exe().unwrap_or_default();
+        me.with_file_name(format!("slipstream-daemon{}", std::env::consts::EXE_SUFFIX))
+    })
+}
+
+/// Start the daemon detached from the caller (terminal or browser), logging to
+/// `daemon.log` in the data folder.
+fn spawn_daemon(paths: &Paths) -> io::Result<()> {
+    use std::process::{Command, Stdio};
+    let exe = daemon_exe();
+    std::fs::create_dir_all(&paths.data_dir)?;
+    let log = std::fs::File::options()
+        .create(true)
+        .append(true)
+        .open(paths.data_dir.join("daemon.log"))?;
+    let mut cmd = Command::new(&exe);
+    cmd.stdin(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log);
+    #[cfg(unix)]
+    {
+        // Own process group: closing the terminal doesn't take the daemon with it.
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0800_0000);
+    }
+    cmd.spawn()
+        .map(drop)
+        .map_err(|e| io::Error::new(e.kind(), format!("could not start {}: {e}", exe.display())))
 }
 
 #[cfg(unix)]
