@@ -28,7 +28,12 @@ for r in $(seq "$RUNS"); do
   for i in "${!LABELS[@]}"; do
     rm -f "$OUT"/*
     t0=$(date +%s.%N)
-    tool "$i" >/dev/null 2>&1
+    if ! tool "$i" >/dev/null 2>"$OUT/err"; then
+      echo "  run $r: ${LABELS[i]}: FAILED: $(tr '' '
+' <"$OUT/err" | grep . | tail -1)" >&2
+      SPEEDS[i]+="fail "
+      continue
+    fi
     t1=$(date +%s.%N)
     mbs=$(echo "$(stat -c %s "$OUT/f") / ($t1 - $t0) / 1000000" | bc -l)
     SPEEDS[i]+="$(printf '%.1f' "$mbs") "
@@ -40,6 +45,6 @@ done
 echo "| Tool | Median | Runs (MB/s) | SHA-256 |"
 echo "|---|---|---|---|"
 for i in "${!LABELS[@]}"; do
-  median=$(tr ' ' '\n' <<<"${SPEEDS[i]}" | grep . | sort -g | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}')
+  median=$(tr ' ' '\n' <<<"${SPEEDS[i]}" | grep -v fail | grep . | sort -g | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}')
   echo "| ${LABELS[i]} | **$median MB/s** | ${SPEEDS[i]% } | \`${SUMS[i]}\` |"
 done
