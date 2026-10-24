@@ -1,9 +1,9 @@
 //! Slipstream command-line client.
 
 use std::io::Write;
-use std::path::PathBuf;
-use std::process::{ExitCode, Stdio};
-use std::time::{Duration, Instant};
+
+use std::process::ExitCode;
+use std::time::Instant;
 
 use slipstream_core::download::{self, Error, Progress, Request};
 use slipstream_core::ipc::{self, AddRequest, Client, DownloadInfo, Paths, Response};
@@ -208,10 +208,10 @@ async fn daemon_status() -> Result<(), String> {
 }
 
 fn autostart(on: &str) -> Result<(), String> {
-    let status = std::process::Command::new(daemon_exe())
+    let status = std::process::Command::new(ipc::daemon_exe())
         .args(["--autostart", on])
         .status()
-        .map_err(|e| format!("could not run {}: {e}", daemon_exe().display()))?;
+        .map_err(|e| format!("could not run {}: {e}", ipc::daemon_exe().display()))?;
     status
         .success()
         .then_some(())
@@ -239,60 +239,12 @@ async fn connect() -> Result<Client, String> {
         .map_err(|_| "the daemon is not running (`slipstream add URL` starts it)".into())
 }
 
-/// Connect, starting the daemon in the background first if it isn't running.
+/// Connect, starting the daemon in the background first if it is not running.
 async fn connect_or_start() -> Result<Client, String> {
     let paths = Paths::from_env().map_err(|e| e.to_string())?;
-    if let Ok(client) = Client::connect(&paths).await {
-        return Ok(client);
-    }
-    spawn_daemon(&paths)?;
-    for _ in 0..100 {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        if let Ok(client) = Client::connect(&paths).await {
-            return Ok(client);
-        }
-    }
-    let log = paths.data_dir.join("daemon.log");
-    Err(format!(
-        "started the daemon but it doesn't answer; see {}",
-        log.display()
-    ))
-}
-
-/// The daemon binary sits next to this one.
-fn daemon_exe() -> PathBuf {
-    let me = std::env::current_exe().unwrap_or_default();
-    me.with_file_name(format!("slipstream-daemon{}", std::env::consts::EXE_SUFFIX))
-}
-
-/// Start the daemon detached from this terminal, logging to `daemon.log`.
-fn spawn_daemon(paths: &Paths) -> Result<(), String> {
-    let exe = daemon_exe();
-    std::fs::create_dir_all(&paths.data_dir).map_err(|e| e.to_string())?;
-    let log = std::fs::File::options()
-        .create(true)
-        .append(true)
-        .open(paths.data_dir.join("daemon.log"))
-        .map_err(|e| e.to_string())?;
-    let mut cmd = std::process::Command::new(&exe);
-    cmd.stdin(Stdio::null())
-        .stdout(log.try_clone().map_err(|e| e.to_string())?)
-        .stderr(log);
-    #[cfg(unix)]
-    {
-        // Own process group: closing this terminal doesn't take the daemon with it.
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
-    #[cfg(windows)]
-    {
-        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0800_0000);
-    }
-    cmd.spawn()
-        .map(drop)
-        .map_err(|e| format!("could not start {}: {e}", exe.display()))
+    Client::connect_or_start(&paths)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 fn print_table(downloads: &[DownloadInfo]) {

@@ -1270,7 +1270,12 @@ dependencies = [
 name = "slipstream-nmhost"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "slipstream-core",
+ "slipstream-daemon",
+ "testserver",
+ "tokio",
 ]
 
 [[package]]
