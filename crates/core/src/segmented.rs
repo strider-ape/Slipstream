@@ -22,6 +22,18 @@ use crate::state::{Segment, State};
 use crate::storage::PartFile;
 
 const TICK: Duration = Duration::from_millis(250);
+
+/// `SLIPSTREAM_DEBUG=1` prints the supervisor's decisions to stderr.
+macro_rules! debug {
+    ($($arg:tt)*) => {
+        if *DEBUG.get_or_init(|| std::env::var_os("SLIPSTREAM_DEBUG").is_some()) {
+            eprintln!("
+[{:>7.2}s] {}", START.get_or_init(Instant::now).elapsed().as_secs_f64(), format!($($arg)*));
+        }
+    };
+}
+static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
 const SAVE_EVERY: Duration = Duration::from_secs(2);
 /// Connections double at most this often.
 const RAMP_EVERY: Duration = Duration::from_secs(1);
@@ -154,6 +166,10 @@ pub(crate) async fn run(
     let mut handles: HashMap<Id, AbortHandle> = HashMap::new();
     let mut max_conn = job.max_conn.max(1);
     let mut allowed = 1;
+    debug!(
+        "start: {} segments, up to {max_conn} connections",
+        state.segments.len()
+    );
     if let Some(res) = first {
         let id = state.segments[0].id;
         spawn(&ctx, &mut workers, &mut handles, id, Some(res));
@@ -217,6 +233,7 @@ pub(crate) async fn run(
                     // A racer failing while the original still runs needs no retry.
                     Err(Fail::Retry(_)) if !others.is_empty() => {}
                     Err(Fail::Retry(why)) => {
+                        debug!("segment {} failed: {why}", conn.seg);
                         let entry = sh.backoff.entry(conn.seg).or_insert((0, now));
                         entry.0 += 1;
                         if entry.0 > MAX_TRIES {
@@ -225,6 +242,7 @@ pub(crate) async fn run(
                         entry.1 = now + backoff(entry.0);
                     }
                     Err(Fail::Busy(wait)) => {
+                        debug!("server busy (429/503): cap at {} connections", workers.len().max(1));
                         // Too many connections for this server: stay below this count.
                         max_conn = workers.len().max(1);
                         allowed = allowed.min(max_conn);
@@ -268,6 +286,7 @@ pub(crate) async fn run(
                 {
                     ramp_check = None;
                     if rate < before_speed * PAYOFF {
+                        debug!("doubling gave {:.2} -> {:.2} MB/s: back to {before_conns}", before_speed / 1e6, rate / 1e6);
                         allowed = before_conns;
                         max_conn = before_conns;
                     }
@@ -276,6 +295,7 @@ pub(crate) async fn run(
                 if ramp_check.is_none() && allowed < max_conn && workers.len() >= allowed
                     && all_receiving && now.duration_since(last_ramp) >= RAMP_EVERY && under_limit
                 {
+                    debug!("ramp up {} -> {} connections at {:.2} MB/s", allowed, (allowed * 2).min(max_conn), rate / 1e6);
                     ramp_check = Some((allowed, rate));
                     allowed = (allowed * 2).min(max_conn);
                     last_ramp = now;
@@ -345,6 +365,7 @@ fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<u32> {
             && !seg(&sh.state, c.seg).is_complete()
     });
     if let Some(c) = stalled {
+        debug!("race stalled segment {}", c.seg);
         return Some(c.seg);
     }
 
@@ -370,6 +391,7 @@ fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<u32> {
         };
         sh.state.segments.push(new);
         sh.state.segments.sort_by_key(|s| s.start);
+        debug!("split segment {best_id} at {mid}: new segment {new_id}");
         return Some(new_id);
     }
 
@@ -386,7 +408,11 @@ fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<u32> {
             && s * 4.0 < fastest
             && rem / s.max(1.0) - rem / fastest >= TAIL_GAIN
     });
-    slow.map(|c| c.seg)
+    let raced = slow.map(|c| c.seg);
+    if let Some(id) = raced {
+        debug!("race slow tail of segment {id}");
+    }
+    raced
 }
 
 /// 0.5 s, 1 s, 2 s, 4 s ... up to 30 s, ±20% so connections don't retry in lockstep.
