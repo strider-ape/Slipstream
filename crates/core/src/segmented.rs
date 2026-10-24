@@ -181,6 +181,10 @@ pub(crate) async fn run(
     let mut ramp_check: Option<(usize, f64)> = None;
     // (time, bytes) samples of about the last second, for an honest average.
     let mut recent: VecDeque<(Instant, u64)> = VecDeque::new();
+    // Speed sampled about a second ago, and whether we ramped at least once.
+    let (mut sample, mut ramped_once): (Option<(Instant, f64)>, bool) = (None, false);
+    // Most connections seen receiving data at the same time.
+    let mut proven = 1;
     let (mut speed, mut last_bytes, mut last_at) = (0.0, state.downloaded(), Instant::now());
     let result = loop {
         // Fill free slots: orphaned segments first, then races, then splits.
@@ -242,9 +246,11 @@ pub(crate) async fn run(
                         entry.1 = now + backoff(entry.0);
                     }
                     Err(Fail::Busy(wait)) => {
-                        debug!("server busy (429/503): cap at {} connections", workers.len().max(1));
-                        // Too many connections for this server: stay below this count.
-                        max_conn = workers.len().max(1);
+                        // Too many connections for this server: stay at what is running now,
+                        // but never below a count that already worked side by side (a 429
+                        // can be a blip while an old connection is still closing).
+                        max_conn = workers.len().max(proven).max(1);
+                        debug!("server busy (429/503): cap at {max_conn} connections");
                         allowed = allowed.min(max_conn);
                         let entry = sh.backoff.entry(conn.seg).or_insert((0, now));
                         entry.1 = now + wait;
@@ -256,9 +262,13 @@ pub(crate) async fn run(
             }
             _ = tick.tick() => {
                 let now = Instant::now();
-                let (downloaded, all_receiving) = {
+                let (downloaded, all_receiving, receiving) = {
                     let sh = ctx.shared.lock().unwrap();
-                    (sh.state.downloaded(), sh.conns.values().all(|c| c.first_byte.is_some()))
+                    (
+                        sh.state.downloaded(),
+                        sh.conns.values().all(|c| c.first_byte.is_some()),
+                        sh.conns.values().filter(|c| c.first_byte.is_some()).count(),
+                    )
                 };
                 let dt = now.duration_since(last_at).as_secs_f64();
                 if dt > 0.0 {
@@ -276,8 +286,20 @@ pub(crate) async fn run(
                 let rate = downloaded.saturating_sub(b0) as f64
                     / now.duration_since(t0).as_secs_f64().max(0.001);
 
-                // Ramp-up: double the connections while every one is busy and
-                // we're not yet near the speed limit.
+                // The first connection speeds up on its own for a while (TCP slow start);
+                // only add connections once it has levelled off, or the "before" speed
+                // is too low and any doubling looks like a gain.
+                let mut settled = ramped_once;
+                match sample {
+                    Some((at, before)) if now.duration_since(at) >= RAMP_EVERY => {
+                        settled |= rate < before * PAYOFF;
+                        sample = Some((now, rate));
+                    }
+                    None => sample = Some((now, rate)),
+                    _ => {}
+                }
+                proven = proven.max(receiving);
+
                 // Did the last doubling pay off? Judge a second later: if speed rose by
                 // less than PAYOFF, the line (or the server) is the limit, so step back
                 // and stop adding connections that would only split the same bandwidth.
@@ -291,14 +313,17 @@ pub(crate) async fn run(
                         max_conn = before_conns;
                     }
                 }
+                // Ramp-up: double the connections while every one is busy, the speed
+                // has levelled off, and we're not yet near the speed limit.
                 let under_limit = job.limit == 0 || speed < 0.85 * job.limit as f64;
-                if ramp_check.is_none() && allowed < max_conn && workers.len() >= allowed
+                if ramp_check.is_none() && settled && allowed < max_conn && workers.len() >= allowed
                     && all_receiving && now.duration_since(last_ramp) >= RAMP_EVERY && under_limit
                 {
                     debug!("ramp up {} -> {} connections at {:.2} MB/s", allowed, (allowed * 2).min(max_conn), rate / 1e6);
                     ramp_check = Some((allowed, rate));
                     allowed = (allowed * 2).min(max_conn);
                     last_ramp = now;
+                    ramped_once = true;
                 }
                 on_progress(Progress { downloaded, size: Some(ctx.size), connections: workers.len() });
                 if now.duration_since(last_save) >= SAVE_EVERY {
