@@ -82,10 +82,11 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         self.tick(ctx.input(|i| i.stable_dt).min(0.1));
 
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+        egui::Panel::top("toolbar").show(ui, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 let _ = ui.button("➕ Add URL");
@@ -103,7 +104,7 @@ impl eframe::App for App {
             ui.add_space(4.0);
         });
 
-        egui::TopBottomPanel::bottom("details").show(ctx, |ui| {
+        egui::Panel::bottom("details").show(ui, |ui| {
             let row = &self.rows[self.selected];
             ui.add_space(4.0);
             ui.label(format!(
@@ -116,7 +117,7 @@ impl eframe::App for App {
             ui.add_space(4.0);
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let search = self.search.to_lowercase();
             let mut clicked = None;
             TableBuilder::new(ui)
