@@ -18,6 +18,8 @@ usage:
   slipstream remove ID [--delete-file]
   slipstream daemon status | stop
   slipstream autostart on | off     start the daemon when you log in
+  slipstream register-browsers      let Chrome/Edge/Brave/Vivaldi/Firefox hand downloads over
+  slipstream unregister-browsers
 
 options for get and add:
   -d, --dir DIR          folder to save into (get: this folder; add: your Downloads folder)
@@ -60,6 +62,8 @@ async fn main() -> ExitCode {
         ["daemon", "status"] => daemon_status().await,
         ["daemon", "stop"] => command(ipc::Request::Shutdown, "Daemon stopping").await,
         ["autostart", on @ ("on" | "off")] => autostart(on),
+        ["register-browsers" | "--register-browsers"] => nmhost("--register"),
+        ["unregister-browsers" | "--unregister-browsers"] => nmhost("--unregister"),
         ["-V" | "--version"] => {
             println!("slipstream {}", slipstream_core::VERSION);
             Ok(())
@@ -216,6 +220,20 @@ fn autostart(on: &str) -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| "changing autostart failed".into())
+}
+
+/// Run the browser host (next to this program) to (un)register it with browsers.
+fn nmhost(flag: &str) -> Result<(), String> {
+    let me = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = me.with_file_name(format!("slipstream-nmhost{}", std::env::consts::EXE_SUFFIX));
+    let status = std::process::Command::new(&exe)
+        .arg(flag)
+        .status()
+        .map_err(|e| format!("could not run {}: {e}", exe.display()))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "browser registration failed".into())
 }
 
 async fn call(client: &mut Client, req: ipc::Request) -> Result<Response, String> {

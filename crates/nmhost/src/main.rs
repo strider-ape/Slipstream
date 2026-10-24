@@ -109,7 +109,12 @@ impl Host {
         };
         match self.ask(&Request::Add(add)).await {
             Ok(Response::Added { id }) => {
-                self.log.line(&format!("caught {} as #{id}", c.url));
+                let forced = if c.modifiers.force {
+                    " (forced with Alt)"
+                } else {
+                    ""
+                };
+                self.log.line(&format!("caught {} as #{id}{forced}", c.url));
                 Outgoing::Verdict {
                     id: c.id,
                     action: Action::Take,
