@@ -12,6 +12,8 @@ usage: slipstream get URL [options]
 options:
   -d, --dir DIR          folder to save into (default: the current folder)
   -o, --output NAME      file name (default: from the server)
+  -c, --connections N    most connections per file (default 8)
+  -l, --limit RATE       speed limit in bytes/s, e.g. 500K or 2M (default none)
   -H, --header 'K: V'    extra request header, repeatable (e.g. 'Cookie: a=b')
 
 Run the same command again to resume an interrupted download.";
@@ -73,6 +75,12 @@ fn parse_get(args: &[String]) -> Result<Request, String> {
         match arg.as_str() {
             "-d" | "--dir" => req.dir = value()?.into(),
             "-o" | "--output" => req.name = Some(value()?.clone()),
+            "-c" | "--connections" => {
+                req.connections = value()?
+                    .parse()
+                    .map_err(|_| "--connections takes a number")?;
+            }
+            "-l" | "--limit" => req.speed_limit = parse_rate(value()?)?,
             "-H" | "--header" => {
                 let h = value()?;
                 let (k, v) = h
@@ -90,6 +98,17 @@ fn parse_get(args: &[String]) -> Result<Request, String> {
         req.dir = std::env::current_dir().map_err(|e| e.to_string())?;
     }
     Ok(req)
+}
+
+/// `500K` → 512000, `2M` → 2097152, `1000` → 1000.
+fn parse_rate(s: &str) -> Result<u64, String> {
+    let (num, mult) = match s.to_ascii_uppercase().chars().last() {
+        Some('K') => (&s[..s.len() - 1], 1024),
+        Some('M') => (&s[..s.len() - 1], 1024 * 1024),
+        _ => (s, 1),
+    };
+    let n: f64 = num.trim().parse().map_err(|_| format!("bad rate: {s}"))?;
+    Ok((n * mult as f64) as u64)
 }
 
 /// One-line progress display on stderr: percent, bytes, speed, time left.
@@ -137,6 +156,9 @@ impl Meter {
                 let secs = size.saturating_sub(p.downloaded) as f64 / self.speed;
                 line += &format!("  ETA {}:{:02}", secs as u64 / 60, secs as u64 % 60);
             }
+        }
+        if p.connections > 0 {
+            line += &format!("  {} conn", p.connections);
         }
         // \r returns to the line start; padding wipes leftovers of a longer line.
         let mut err = std::io::stderr().lock();
@@ -191,6 +213,14 @@ mod tests {
         assert!(parse_get(&args(&["-d"])).is_err());
         assert!(parse_get(&args(&[])).is_err());
         assert!(parse_get(&args(&["u1", "u2"])).is_err());
+    }
+
+    #[test]
+    fn rates() {
+        assert_eq!(parse_rate("1000"), Ok(1000));
+        assert_eq!(parse_rate("500K"), Ok(512_000));
+        assert_eq!(parse_rate("1.5m"), Ok(1_572_864));
+        assert!(parse_rate("fast").is_err());
     }
 
     #[test]
