@@ -1,4 +1,4 @@
-﻿# Slipstream
+# Slipstream
 
 A light, fast, open-source download manager for **Windows and Linux**, written in Rust.
 
