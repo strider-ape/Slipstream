@@ -38,9 +38,23 @@ This server allows 2 connections per client (more get `429` as an HTML page) and
 client's total speed, so no tool can beat one stream here. It exposed a real bug (an HTML
 429 was reported as "link expired"); fixed, and the test server now sends HTML 429s.
 
-**OVH, 125 MB** (`proof.ovh.net/files/1Gb.dat`), round 1 only: curl 9.0 MB/s,
+**OVH, 1 GiB** (`proof.ovh.net/files/1Gb.dat`), round 1 only: curl 9.0 MB/s,
 slipstream -c 8 8.4 MB/s, -c 16 7.6 MB/s. Then aria2c's 16 connections failed and the server
 stopped accepting any connection from us (a temporary block), so the run was stopped.
+
+**After the full-line fix** (same day): connections are added only once the first one has
+left TCP slow start, a doubling that adds < 15% speed is undone, slow connections are raced
+only if that saves ≥ 2 s, and a 429 never caps below a count that already worked.
+`SLIPSTREAM_DEBUG=1` shows these decisions, e.g. on Hetzner: "ramp up 1 -> 2 at 2.35 MB/s",
+then "doubling gave 2.35 -> 2.39 MB/s: back to 1".
+
+| Hetzner 100 MB, 3 rounds | Median | Runs (MB/s) |
+|---|---|---|
+| curl, 1 stream | **2.6 MB/s** | 2.1 2.6 2.9 |
+| slipstream -c 8 | **2.5 MB/s** | 2.5 2.3 3.3 |
+
+Before the fix Slipstream lost every round (−7% to −26%); now it wins 2 of 3 (the line
+itself swings ±20% between rounds). Note: OVH's `1Gb.dat` is 1 GiB, not 125 MB.
 
 **Takeaways**
 - On these servers one stream already gets all the server/line allows, so more connections
