@@ -32,13 +32,13 @@ pub struct Request {
     /// Headers to replay, e.g. from the browser (Cookie, Referer, User-Agent...).
     pub headers: Vec<(String, String)>,
     /// Folder to save into.
+    pub dir: PathBuf,
+    /// File name to use instead of the server's.
     pub name: Option<String>,
     /// Most connections to use (0 = default, 8).
     pub connections: usize,
     /// Speed limit in bytes/s (0 = unlimited).
     pub speed_limit: u64,
-    /// File name to use instead of the server's.
-    pub name: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]
