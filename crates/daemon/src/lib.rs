@@ -17,7 +17,7 @@ use slipstream_core::ipc::{
 use slipstream_core::storage::{part_path, sidecar_path};
 use tokio::io::BufReader;
 use tokio::sync::{Notify, oneshot};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 
 use catalogue::Catalogue;
 
@@ -46,11 +46,12 @@ pub async fn run(paths: &Paths) -> io::Result<()> {
         daemon.start(id);
     }
 
+    let mut clients = JoinSet::new();
     loop {
         tokio::select! {
             conn = listener.accept() => match conn {
                 Ok(stream) => {
-                    tokio::spawn(serve(daemon.clone(), stream));
+                    clients.spawn(serve(daemon.clone(), stream));
                 }
                 Err(e) => eprintln!("slipstream-daemon: accept failed: {e}"),
             },
@@ -60,6 +61,9 @@ pub async fn run(paths: &Paths) -> io::Result<()> {
     }
     // Stop every download cleanly (progress saved). Their status stays "downloading",
     // so the next start continues them.
+    // Hang up on clients: on Windows a pipe name stays taken while any
+    // connection to it is open, which would block the next daemon.
+    clients.shutdown().await;
     let all: Vec<i64> = daemon.running.lock().unwrap().keys().copied().collect();
     for id in all {
         daemon.stop(id).await;
