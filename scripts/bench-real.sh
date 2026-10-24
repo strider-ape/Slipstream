@@ -3,7 +3,8 @@
 # Slipstream vs aria2c on the same URL. Files go to RAM (/dev/shm) so the disk
 # doesn't skew results; tools take turns in each round so network swings hit all.
 # Prints one markdown row per tool: median speed, every run, SHA-256 prefix.
-# Usage: scripts/bench-real.sh URL [RUNS]      (needs curl, aria2c, bc)
+# Usage: [TOOLS="0 1"] scripts/bench-real.sh URL [RUNS]   (needs curl, aria2c, bc)
+# TOOLS picks rows: 0 curl, 1 slipstream -c 8, 2 slipstream -c 16, 3 aria2c.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 URL=$1
@@ -25,7 +26,7 @@ tool() {
 
 declare -a SPEEDS SUMS
 for r in $(seq "$RUNS"); do
-  for i in "${!LABELS[@]}"; do
+  for i in ${TOOLS:-0 1 2 3}; do
     rm -f "$OUT"/*
     t0=$(date +%s.%N)
     if ! tool "$i" >/dev/null 2>"$OUT/err"; then
@@ -43,7 +44,7 @@ done
 
 echo "| Tool | Median | Runs (MB/s) | SHA-256 |"
 echo "|---|---|---|---|"
-for i in "${!LABELS[@]}"; do
+for i in ${TOOLS:-0 1 2 3}; do
   median=$(tr ' ' '\n' <<<"${SPEEDS[i]}" | grep -v fail | grep . | sort -g | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}')
   echo "| ${LABELS[i]} | **$median MB/s** | ${SPEEDS[i]% } | \`${SUMS[i]}\` |"
 done
