@@ -21,5 +21,31 @@ writeback in a 3.4 GB VM). Eight connections writing at scattered offsets also c
 kernel more than one sequential writer. Re-measure on bare-metal Linux and native Windows
 before judging the 5% target.
 
-## Real-world (TEST-PLAN §B)
-Not yet recorded: browser vs Slipstream vs `aria2c -x16 -s16` on a large ISO / speed-test file.
+## Real-world (TEST-PLAN §B), 2026-10-24
+Home connection in India, WSL2, files saved to RAM (`scripts/bench-real.sh`), tools taking
+turns each round, 3 rounds, median. All tools produced the same SHA-256.
+
+**Hetzner Singapore, 100 MB** (`sin-speed.hetzner.com/100MB.bin`)
+
+| Tool | Median | Runs (MB/s) |
+|---|---|---|
+| curl, 1 stream | **3.6 MB/s** | 3.6 3.6 3.7 |
+| slipstream -c 8 | **3.5 MB/s** | 3.3 3.8 3.5 |
+| slipstream -c 16 | **3.7 MB/s** | 3.2 3.7 4.1 |
+| aria2c -x16 -s16 | **3.6 MB/s** | 3.6 3.6 3.0 |
+
+This server allows 2 connections per client (more get `429` as an HTML page) and caps the
+client's total speed, so no tool can beat one stream here. It exposed a real bug (an HTML
+429 was reported as "link expired"); fixed, and the test server now sends HTML 429s.
+
+**OVH, 125 MB** (`proof.ovh.net/files/1Gb.dat`), round 1 only: curl 9.0 MB/s,
+slipstream -c 8 8.4 MB/s, -c 16 7.6 MB/s. Then aria2c's 16 connections failed and the server
+stopped accepting any connection from us (a temporary block), so the run was stopped.
+
+**Takeaways**
+- On these servers one stream already gets all the server/line allows, so more connections
+  can't help. The win is on servers that throttle *per connection* (locally: 7.7 vs 1 MB/s).
+- When the line is the bottleneck Slipstream is 5–15% behind one stream. Likely causes:
+  racing connections only for being slower than others (duplicate bytes on a full line), and
+  ramping up even when more connections add no speed. To fix next.
+- Aggressive connection counts can get a client blocked; keep 8 as the default.

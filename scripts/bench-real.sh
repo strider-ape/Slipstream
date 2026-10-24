@@ -29,8 +29,7 @@ for r in $(seq "$RUNS"); do
     rm -f "$OUT"/*
     t0=$(date +%s.%N)
     if ! tool "$i" >/dev/null 2>"$OUT/err"; then
-      echo "  run $r: ${LABELS[i]}: FAILED: $(tr '' '
-' <"$OUT/err" | grep . | tail -1)" >&2
+      echo "  run $r: ${LABELS[i]}: FAILED: $(tr '\r' '\n' <"$OUT/err" | grep . | tail -1)" >&2
       SPEEDS[i]+="fail "
       continue
     fi
