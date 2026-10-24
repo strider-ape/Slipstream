@@ -17,6 +17,7 @@ Query parameters (combine freely; booleans are written =true):
   drop_pct=N           N% of responses are cut off after a random number of bytes
   slow_from=N          responses starting at or after offset N ...
   slow_rate=N          ... are limited to N bytes/s (slow tail, for hedging)
+  slow_count=N         only the first N of those are slow (one bad connection)
   etag_change_after=N  after N requests the file changes (new ETag + bytes)
   html_after=N         after N requests, an HTML "session expired" page (200)
   conn_limit=N         more than N simultaneous downloads get 429 ...

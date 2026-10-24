@@ -47,6 +47,8 @@ pub struct Opts {
     pub slow_from: Option<u64>,
     /// ...are throttled to this many bytes/s instead.
     pub slow_rate: u64,
+    /// Only the first N such responses are slow (one bad connection), default all.
+    pub slow_count: Option<u64>,
     /// After this many requests the file "changes on the server" (new ETag and bytes).
     pub etag_change_after: u64,
     /// After this many requests, answer with an HTML error page (expired link).
@@ -70,6 +72,7 @@ impl Opts {
 struct Counters {
     requests: AtomicU64,
     active: AtomicU64,
+    slow: AtomicU64,
 }
 
 #[derive(Default)]
@@ -271,10 +274,11 @@ fn serve_file(counters: &Arc<Counters>, name: &str, opts: &Opts, req: &HeaderMap
         res = res.header(header::CONTENT_LENGTH, HeaderValue::from(len));
     }
 
-    let rate = match opts.slow_from {
-        Some(from) if start >= from => opts.slow_rate,
-        _ => opts.throttle,
-    };
+    let slow = matches!(opts.slow_from, Some(from) if start >= from)
+        && opts
+            .slow_count
+            .is_none_or(|n| counters.slow.fetch_add(1, Ordering::SeqCst) < n);
+    let rate = if slow { opts.slow_rate } else { opts.throttle };
     // Deterministic "random" per request, so a failing test fails the same way twice.
     let r = content::splitmix64(content::fnv1a(name.as_bytes()) ^ n);
     // The cut lands after at least one byte and before the last one.
