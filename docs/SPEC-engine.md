@@ -15,7 +15,7 @@ crates/
   daemon/    # background process: owns downloads, SQLite catalogue, IPC server
   cli/       # `slipstream add URL ...`, `slipstream list`, talks to daemon over IPC
   nmhost/    # native messaging host (see SPEC-browser-capture.md)
-  gui/       # egui app (client of the daemon)
+  gui/       # Slint app, software renderer (client of the daemon)
 extension/   # WebExtension (plain JS, no bundler)
 tools/testserver/  # local HTTP server for tests (Range, throttling, faults)
 ```

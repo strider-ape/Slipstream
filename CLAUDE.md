@@ -27,6 +27,8 @@ Learner who loves Linux/Android internals. Explain simply and teach as you go ("
 ```
 crates/{core,daemon,cli,nmhost,gui}   extension/   tools/testserver/   docs/
 ```
+GUI: **Slint** with the software renderer (`SLINT_BACKEND=winit-software` behaviour, no OpenGL), classic table layout, theme follows the system. Chosen after the prototypes in `prototypes/` (see its README for the numbers).
+
 Crate package names are prefixed `slipstream-` (e.g. `slipstream-core`); the CLI binary is `slipstream`.
 
 ## Commands
