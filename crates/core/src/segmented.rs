@@ -92,7 +92,6 @@ struct Conn {
     first_byte: Option<Instant>,
     last_data: Instant,
     bytes: u64,
-    racing: bool,
 }
 
 impl Conn {
@@ -153,7 +152,7 @@ pub(crate) async fn run(
     let mut allowed = 1;
     if let Some(res) = first {
         let id = state.segments[0].id;
-        spawn(&ctx, &mut workers, &mut handles, id, false, Some(res));
+        spawn(&ctx, &mut workers, &mut handles, id, Some(res));
     }
 
     let mut tick = tokio::time::interval(TICK);
@@ -168,8 +167,8 @@ pub(crate) async fn run(
                 MIN_SEG_SLOW
             };
             let next = assign(&mut ctx.shared.lock().unwrap(), Instant::now(), min_seg);
-            let Some((id, racing)) = next else { break };
-            spawn(&ctx, &mut workers, &mut handles, id, racing, None);
+            let Some(id) = next else { break };
+            spawn(&ctx, &mut workers, &mut handles, id, None);
         }
         if ctx
             .shared
@@ -279,7 +278,6 @@ fn spawn(
     workers: &mut JoinSet<Result<(), Fail>>,
     handles: &mut HashMap<Id, AbortHandle>,
     seg: u32,
-    racing: bool,
     first: Option<Response>,
 ) {
     // Hold the lock while spawning so the worker finds its entry in `conns`.
@@ -291,14 +289,13 @@ fn spawn(
         first_byte: None,
         last_data: now,
         bytes: 0,
-        racing,
     };
     sh.conns.insert(handle.id(), conn);
     handles.insert(handle.id(), handle);
 }
 
-/// Pick work for a free connection: `(segment id, racing?)`.
-fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<(u32, bool)> {
+/// Pick work for a free connection: a segment id (two owners on one segment = a race).
+fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<u32> {
     let owners = |sh: &Shared, id: u32| sh.conns.values().filter(|c| c.seg == id).count();
 
     // 1. Unfinished segments nobody works on (resume, or retry after a failure).
@@ -308,7 +305,7 @@ fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<(u32, bool)> {
             && sh.backoff.get(&s.id).is_none_or(|(_, at)| *at <= now)
     });
     if let Some(s) = orphan {
-        return Some((s.id, false));
+        return Some(s.id);
     }
 
     // 2. Race a connection that went silent: its bytes may never come otherwise.
@@ -318,7 +315,7 @@ fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<(u32, bool)> {
             && !seg(&sh.state, c.seg).is_complete()
     });
     if let Some(c) = stalled {
-        return Some((c.seg, true));
+        return Some(c.seg);
     }
 
     // 3. Split the biggest remaining segment; the new connection takes the upper half.
@@ -343,7 +340,7 @@ fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<(u32, bool)> {
         };
         sh.state.segments.push(new);
         sh.state.segments.sort_by_key(|s| s.start);
-        return Some((new_id, false));
+        return Some(new_id);
     }
 
     // 4. Nothing worth splitting: race a connection that is far slower than the
@@ -358,7 +355,7 @@ fn assign(sh: &mut Shared, now: Instant, min_seg: u64) -> Option<(u32, bool)> {
             && s * 4.0 < fastest
             && rem > s * 2.0
     });
-    slow.map(|c| (c.seg, true))
+    slow.map(|c| c.seg)
 }
 
 /// 0.5 s, 1 s, 2 s, 4 s ... up to 30 s, ±20% so connections don't retry in lockstep.
