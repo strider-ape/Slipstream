@@ -3,6 +3,8 @@
 
 pub mod download;
 pub mod filename;
+mod limiter;
+mod segmented;
 pub mod state;
 pub mod storage;
 

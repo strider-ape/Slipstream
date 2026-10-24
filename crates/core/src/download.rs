@@ -5,6 +5,7 @@ use std::fmt;
 use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -15,6 +16,7 @@ use reqwest::header::{
 use reqwest::{Client, Response, StatusCode, Url};
 
 use crate::filename;
+use crate::segmented::{self, End, Job};
 use crate::state::{Segment, State, Validator};
 use crate::storage::{PartFile, part_path, sidecar_path};
 
@@ -30,7 +32,11 @@ pub struct Request {
     /// Headers to replay, e.g. from the browser (Cookie, Referer, User-Agent...).
     pub headers: Vec<(String, String)>,
     /// Folder to save into.
-    pub dir: PathBuf,
+    pub name: Option<String>,
+    /// Most connections to use (0 = default, 8).
+    pub connections: usize,
+    /// Speed limit in bytes/s (0 = unlimited).
+    pub speed_limit: u64,
     /// File name to use instead of the server's.
     pub name: Option<String>,
 }
@@ -39,6 +45,8 @@ pub struct Request {
 pub struct Progress {
     pub downloaded: u64,
     pub size: Option<u64>,
+    /// Connections currently downloading.
+    pub connections: usize,
 }
 
 #[derive(Debug)]
@@ -75,6 +83,8 @@ pub enum Error {
     },
     /// Stopped by the caller; progress is saved.
     Cancelled,
+    /// A part kept failing after every retry.
+    GaveUp(String),
 }
 
 impl fmt::Display for Error {
@@ -103,6 +113,7 @@ impl fmt::Display for Error {
                 )
             }
             Error::Cancelled => write!(f, "stopped; run again to resume"),
+            Error::GaveUp(why) => write!(f, "gave up after repeated failures: {why}"),
         }
     }
 }
@@ -135,57 +146,111 @@ pub async fn download(
     let client = client()?;
     std::fs::create_dir_all(&req.dir)?;
 
-    let (target, mut state, res, resumed_from, restarted) = match find_resumable(&req.dir, &req.url)
-    {
-        Some((target, old)) => {
-            let resumed = resume(&client, old).await?;
-            (
-                target,
-                resumed.state,
-                resumed.res,
-                resumed.from,
-                resumed.restarted,
-            )
-        }
-        None => {
-            let (state, res) = probe(&client, &req.url, &req.headers).await?;
-            let name = match &req.name {
-                Some(n) => filename::sanitize(n),
-                None => filename::choose(
-                    header(&res, CONTENT_DISPOSITION),
-                    res.url(),
-                    state.mime.as_deref(),
-                ),
-            };
-            let target = filename::unique(&req.dir, &name, taken);
-            (target, state, Some(res), 0, false)
-        }
-    };
+    let (target, mut state, mut first, resumed_from, mut restarted) =
+        match find_resumable(&req.dir, &req.url) {
+            // Ranges work: the workers continue every unfinished segment, each
+            // request guarded by If-Range.
+            Some((target, old)) if segmentable(&old) => {
+                let from = old.downloaded();
+                (target, old, None, from, false)
+            }
+            Some((target, old)) => {
+                let r = resume(&client, old).await?;
+                (target, r.state, r.res, r.from, r.restarted)
+            }
+            None => {
+                let (state, res) = probe(&client, &req.url, &req.headers).await?;
+                let name = match &req.name {
+                    Some(n) => filename::sanitize(n),
+                    None => filename::choose(
+                        header(&res, CONTENT_DISPOSITION),
+                        res.url(),
+                        state.mime.as_deref(),
+                    ),
+                };
+                let target = filename::unique(&req.dir, &name, taken);
+                (target, state, Some(res), 0, false)
+            }
+        };
 
     let part_file = part_path(&target);
     let sidecar = sidecar_path(&target);
-    if restarted {
-        // Old bytes belong to another version of the file (or can't be resumed).
-        let _ = std::fs::remove_file(&part_file);
-    }
-    let part = PartFile::open(&part_file, state.validator.size)?;
-    state.save(&sidecar)?;
+    tokio::pin!(cancel);
+    let mut restarts = 0;
+    let part = loop {
+        if restarted {
+            // Old bytes belong to another version of the file (or can't be resumed).
+            let _ = std::fs::remove_file(&part_file);
+        }
+        let part = Arc::new(PartFile::open(&part_file, state.validator.size)?);
+        state.save(&sidecar)?;
 
-    if let Some(res) = res
-        && !state.segments.is_empty()
-    {
-        tokio::pin!(cancel);
-        let received = receive(res, &part, &mut state, &sidecar, cancel, &mut on_progress).await;
-        // Whatever happened, keep what we have so the next run can resume.
+        if !segmentable(&state) {
+            // One plain stream: unknown size, or a server without ranges.
+            if let Some(res) = first.take()
+                && !state.segments.is_empty()
+            {
+                let received = receive(
+                    res,
+                    &part,
+                    &mut state,
+                    &sidecar,
+                    cancel.as_mut(),
+                    &mut on_progress,
+                )
+                .await;
+                // Whatever happened, keep what we have so the next run can resume.
+                part.sync()?;
+                state.save(&sidecar)?;
+                received?;
+            }
+            break part;
+        }
+
+        let job = Job {
+            client: &client,
+            part: &part,
+            sidecar: &sidecar,
+            max_conn: if req.connections == 0 {
+                8
+            } else {
+                req.connections
+            },
+            limit: req.speed_limit,
+        };
+        let run = segmented::run(
+            job,
+            &mut state,
+            first.take(),
+            cancel.as_mut(),
+            &mut on_progress,
+        )
+        .await;
         part.sync()?;
         state.save(&sidecar)?;
-        received?;
-    }
+        match run {
+            Ok(()) => break part,
+            Err(End::Failed(e)) => return Err(e),
+            Err(End::Restart { .. }) if restarts >= 3 => {
+                return Err(Error::GaveUp(
+                    "the file keeps changing on the server".into(),
+                ));
+            }
+            Err(End::Restart { single }) => {
+                // The file changed (or ranges stopped working): start over.
+                restarts += 1;
+                restarted = true;
+                drop(part);
+                let (mut fresh, res) = probe(&client, &state.url, &state.headers).await?;
+                fresh.ranged &= !single;
+                state = fresh;
+                first = Some(res);
+            }
+        }
+    };
 
-    let seg = state.segments.first();
-    if let Some(seg) = seg
-        && let Some(expected) = state.validator.size
-        && !seg.is_complete()
+    if let Some(expected) = state.validator.size
+        && state.segments.iter().any(|s| !s.is_complete())
     {
         return Err(Error::Incomplete {
             got: state.downloaded(),
@@ -195,6 +260,7 @@ pub async fn download(
     on_progress(Progress {
         downloaded: state.downloaded(),
         size: state.validator.size,
+        connections: 0,
     });
 
     // Finalize: everything is on disk → check the size, rename, drop the sidecar.
@@ -230,6 +296,11 @@ pub async fn download(
     })
 }
 
+/// Can many connections work on this download? (ranges + known size)
+fn segmentable(state: &State) -> bool {
+    state.ranged && state.validator.size.is_some() && !state.segments.is_empty()
+}
+
 /// A name is taken if the file, its part file or its sidecar exists.
 fn taken(p: &Path) -> bool {
     p.exists() || part_path(p).exists() || sidecar_path(p).exists()
@@ -256,7 +327,7 @@ fn find_resumable(dir: &Path, url: &str) -> Option<(PathBuf, State)> {
 }
 
 /// Send a GET with the replayed headers plus our defaults.
-async fn send(
+pub(crate) async fn send(
     client: &Client,
     url: &str,
     headers: &[(String, String)],
@@ -461,6 +532,7 @@ async fn receive(
             on_progress(Progress {
                 downloaded: state.downloaded(),
                 size: state.validator.size,
+                connections: 1,
             });
             last_tick = Instant::now();
         }
@@ -482,12 +554,12 @@ async fn receive(
     Ok(())
 }
 
-fn header(res: &Response, name: reqwest::header::HeaderName) -> Option<&str> {
+pub(crate) fn header(res: &Response, name: reqwest::header::HeaderName) -> Option<&str> {
     res.headers().get(name)?.to_str().ok()
 }
 
 /// `Content-Range: bytes 0-99/1000` → (0, 99, Some(1000)); `/*` total → None.
-fn content_range(res: &Response) -> Option<(u64, u64, Option<u64>)> {
+pub(crate) fn content_range(res: &Response) -> Option<(u64, u64, Option<u64>)> {
     parse_content_range(header(res, CONTENT_RANGE)?)
 }
 
