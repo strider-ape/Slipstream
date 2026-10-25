@@ -2,7 +2,7 @@
 
 A light, fast, open-source download manager for **Windows and Linux**, written in Rust.
 
-**Status:** early development. M4 done (background daemon, `add`/`list`/`watch`). M3: up to 8 connections per file with dynamic splitting,
+**Status:** early development. M5 done (browser bridge: native messaging host + `register-browsers`). M4: background daemon, `add`/`list`/`watch`. M3: up to 8 connections per file with dynamic splitting,
 slow-tail racing, retries and a speed limit; resumes byte-exact after `kill -9`. See [benchmarks](docs/benchmarks.md).
 
 ## Try it
@@ -24,6 +24,13 @@ slipstream autostart on | off   # start the daemon at login
 ```
 Clients talk to the daemon over a private Unix socket / named pipe (same user only, no
 network port). Demo: `scripts/daemon-demo.sh`.
+
+### Browser bridge
+`slipstream register-browsers` tells Chrome, Chromium, Edge, Brave, Vivaldi and Firefox
+where `slipstream-nmhost` is (Linux: a JSON file per installed browser; Windows: an HKCU
+registry key per browser). The browser extension (coming next) uses it to hand downloads
+over with their cookies. `unregister-browsers` undoes it. Snap and Flatpak browsers on
+Linux are sandboxed and need extra setup, not covered yet.
 
 ## Goals for v1
 1. **Fast downloads**: many connections per file with dynamic segmentation, resume after crashes or reboots.
