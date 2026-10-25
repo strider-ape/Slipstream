@@ -4991,7 +4991,7 @@ dependencies = [
 
 [[package]]
 name = "slipstream-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "slipstream-core",
  "tokio",
@@ -4999,7 +4999,7 @@ dependencies = [
 
 [[package]]
 name = "slipstream-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "futures-util",
  "reqwest",
@@ -5012,7 +5012,7 @@ dependencies = [
 
 [[package]]
 name = "slipstream-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -5023,7 +5023,7 @@ dependencies = [
 
 [[package]]
 name = "slipstream-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "slint",
  "slint-build",
@@ -5034,7 +5034,7 @@ dependencies = [
 
 [[package]]
 name = "slipstream-nmhost"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5383,7 +5383,7 @@ dependencies = [
 
 [[package]]
 name = "testserver"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "futures-util",

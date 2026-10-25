@@ -14,3 +14,31 @@ path = "src/main.rs"
 [dependencies]
 slipstream-core.workspace = true
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal"] }
+
+# Linux package: `cargo deb -p slipstream-cli --no-build` after a release build of all four programs.
+[package.metadata.deb]
+name = "slipstream"
+maintainer = "strider-ape <gdr9725@gmail.com>"
+copyright = "Slipstream contributors"
+license-file = ["../../LICENSE", "0"]
+section = "net"
+priority = "optional"
+extended-description = """\
+Download manager for Linux and Windows: many connections per file with dynamic \
+splitting, crash-safe resume, and catching downloads from Chrome, Edge and Firefox \
+(with their cookies) through a browser extension."""
+depends = "$auto"
+assets = [
+    ["target/release/slipstream", "usr/bin/", "755"],
+    ["target/release/slipstream-daemon", "usr/bin/", "755"],
+    ["target/release/slipstream-nmhost", "usr/bin/", "755"],
+    ["target/release/slipstream-gui", "usr/bin/", "755"],
+    ["../../packaging/linux/slipstream.desktop", "usr/share/applications/", "644"],
+    ["../gui/ui/icon.png", "usr/share/icons/hicolor/128x128/apps/slipstream.png", "644"],
+    # System-wide browser registration: no per-user step needed.
+    ["../../packaging/linux/chromium-host.json", "etc/opt/chrome/native-messaging-hosts/org.slipstream.host.json", "644"],
+    ["../../packaging/linux/chromium-host.json", "etc/chromium/native-messaging-hosts/org.slipstream.host.json", "644"],
+    ["../../packaging/linux/chromium-host.json", "etc/opt/edge/native-messaging-hosts/org.slipstream.host.json", "644"],
+    ["../../packaging/linux/firefox-host.json", "usr/lib/mozilla/native-messaging-hosts/org.slipstream.host.json", "644"],
+    ["../../README.md", "usr/share/doc/slipstream/", "644"],
+]

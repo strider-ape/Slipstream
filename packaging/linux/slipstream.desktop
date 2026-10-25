@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Slipstream
+GenericName=Download Manager
+Comment=Fast downloads with many connections, caught from your browser
+Exec=slipstream-gui
+Icon=slipstream
+Terminal=false
+Categories=Network;FileTransfer;
+StartupWMClass=slipstream-gui

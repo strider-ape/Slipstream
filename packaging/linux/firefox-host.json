@@ -1,0 +1,7 @@
+{
+  "name": "org.slipstream.host",
+  "description": "Slipstream download manager",
+  "path": "/usr/bin/slipstream-nmhost",
+  "type": "stdio",
+  "allowed_extensions": ["slipstream@strider-ape.github.io"]
+}

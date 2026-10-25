@@ -1,7 +1,7 @@
 name: Release
 
-# Push a tag like v0.1.0 to build and publish a release.
-# Run it by hand (Actions > Release > Run workflow) to only build and check the archives.
+# Push a tag like v0.2.0 to build and publish a release.
+# Run it by hand (Actions > Release > Run workflow) to only build and check the files.
 on:
   push:
     tags: ['v*']
@@ -12,62 +12,86 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  BINS: -p slipstream-cli -p slipstream-daemon -p slipstream-nmhost -p slipstream-gui
 
 jobs:
-  build:
-    name: ${{ matrix.target }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          # Older Ubuntu = older glibc, so the binary runs on more distros.
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-    runs-on: ${{ matrix.os }}
+  windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - name: Linux GUI libraries
-        if: runner.os == 'Linux'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libfontconfig1-dev libxkbcommon-dev
       - name: Build
-        run: cargo build --release --locked -p slipstream-cli -p slipstream-daemon -p slipstream-nmhost -p slipstream-gui --target ${{ matrix.target }}
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
+        run: cargo build --release --locked ${{ env.BINS }}
+      - name: Package (zip + installer)
         shell: pwsh
         run: |
-          $name = "slipstream-${{ github.ref_name }}-${{ matrix.target }}" -replace '/', '-'
-          New-Item -ItemType Directory $name | Out-Null
-          $bin = "target/${{ matrix.target }}/release"
+          $ver = (cargo pkgid -p slipstream-cli).Split('@')[-1]
+          $name = "slipstream-${{ github.ref_name }}-x86_64-pc-windows-msvc" -replace '/', '-'
+          New-Item -ItemType Directory $name, dist | Out-Null
+          $bin = "target/release"
           Copy-Item "$bin/slipstream.exe", "$bin/slipstream-daemon.exe", "$bin/slipstream-nmhost.exe", "$bin/slipstream-gui.exe", README.md, LICENSE $name
-          Compress-Archive $name "$name.zip"
-          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+          Compress-Archive $name "dist/$name.zip"
           & "$name/slipstream.exe" --version
-      - name: Package (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          name="slipstream-${GITHUB_REF_NAME//\//-}-${{ matrix.target }}"
-          mkdir "$name"
-          bin=target/${{ matrix.target }}/release
-          cp "$bin/slipstream" "$bin/slipstream-daemon" "$bin/slipstream-nmhost" "$bin/slipstream-gui" README.md LICENSE "$name/"
-          tar czf "$name.tar.gz" "$name"
-          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
-          "$name/slipstream" --version
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\iscc.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /Q "/DVersion=$ver" "/DBin=$((Resolve-Path $bin).Path)" "/DOut=$((Resolve-Path dist).Path)" packaging/windows/slipstream.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem dist | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -Encoding ascii "$($_.FullName).sha256"
+          }
+          Get-ChildItem dist | Format-Table Name, Length
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}
-          path: |
-            slipstream-*.zip
-            slipstream-*.tar.gz
-            slipstream-*.sha256
+          name: windows
+          path: dist/*
+
+  linux:
+    # Older Ubuntu = older glibc, so the programs run on more distros.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux GUI libraries
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libfontconfig1-dev libxkbcommon-dev
+      - name: Build
+        run: cargo build --release --locked ${{ env.BINS }}
+      - name: Package (tar.gz + .deb)
+        run: |
+          name="slipstream-${GITHUB_REF_NAME//\//-}-x86_64-unknown-linux-gnu"
+          mkdir -p "$name" dist
+          bin=target/release
+          cp "$bin/slipstream" "$bin/slipstream-daemon" "$bin/slipstream-nmhost" "$bin/slipstream-gui" README.md LICENSE "$name/"
+          tar czf "dist/$name.tar.gz" "$name"
+          "$name/slipstream" --version
+          cargo install cargo-deb --locked --quiet
+          cargo deb -p slipstream-cli --no-build --output dist/
+          dpkg-deb --info dist/*.deb | grep -E "Package|Version|Depends"
+          (cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done)
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Package the extension
+        run: |
+          bash extension/build.sh
+          mkdir dist
+          (cd extension/dist/chrome && zip -qr ../../../dist/slipstream-extension-chrome-${GITHUB_REF_NAME//\//-}.zip .)
+          (cd extension/dist/firefox && zip -qr ../../../dist/slipstream-extension-firefox-${GITHUB_REF_NAME//\//-}.zip .)
+          (cd dist && for f in *; do sha256sum "$f" > "$f.sha256"; done)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension
+          path: dist/*
 
   release:
-    needs: build
+    needs: [windows, linux, extension]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -76,10 +100,10 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Publish pre-release
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* --prerelease \
-            --title "Slipstream $GITHUB_REF_NAME (preview)" \
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --prerelease --title "Slipstream $GITHUB_REF_NAME (preview)" \
             --notes-file "docs/release-notes/$GITHUB_REF_NAME.md"
