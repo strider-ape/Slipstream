@@ -27,7 +27,7 @@ extended-description = """\
 Download manager for Linux and Windows: many connections per file with dynamic \
 splitting, crash-safe resume, and catching downloads from Chrome, Edge and Firefox \
 (with their cookies) through a browser extension."""
-depends = "$auto"
+depends = "$auto, libxkbcommon0"
 assets = [
     ["target/release/slipstream", "usr/bin/", "755"],
     ["target/release/slipstream-daemon", "usr/bin/", "755"],
