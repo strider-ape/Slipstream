@@ -386,7 +386,23 @@ impl Meter {
 async fn serve(daemon: Arc<Daemon>, stream: Stream) {
     let (r, mut w) = tokio::io::split(stream);
     let mut r = BufReader::new(r);
-    while let Ok(Some(req)) = ipc::recv::<Request>(&mut r).await {
+    loop {
+        let req = match ipc::recv::<Request>(&mut r).await {
+            Ok(Some(req)) => req,
+            // A request this daemon doesn't know (e.g. from a newer app): say so, keep going.
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                let message =
+                    format!("unknown request (is the daemon older than the app? restart it): {e}");
+                if ipc::send(&mut w, &Response::Error { message })
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+                continue;
+            }
+            _ => return,
+        };
         if req == Request::Watch {
             loop {
                 let snapshot = daemon.handle(Request::List).await;
