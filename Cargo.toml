@@ -22,6 +22,8 @@ slipstream-core = { path = "crates/core" }
 
 # Small, fast release binaries: whole-program optimisation, no debug symbols.
 [profile.release]
+# Smallest code: these programs wait on the network, not the CPU.
+opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true

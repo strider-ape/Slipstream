@@ -6,6 +6,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod link;
+#[cfg(windows)]
+mod tray;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -100,6 +102,22 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    run(&ui)
+}
+
+/// Windows: closing the window hides it to the tray; Quit in the tray menu ends.
+#[cfg(windows)]
+fn run(ui: &MainWindow) -> Result<(), slint::PlatformError> {
+    let _tray = tray::Tray::new(ui.as_weak()).map_err(slint::PlatformError::Other)?;
+    ui.window()
+        .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
+    ui.show()?;
+    slint::run_event_loop_until_quit()
+}
+
+/// Linux: no tray yet, so closing the window ends the app (downloads go on in the daemon).
+#[cfg(not(windows))]
+fn run(ui: &MainWindow) -> Result<(), slint::PlatformError> {
     ui.run()
 }
 
