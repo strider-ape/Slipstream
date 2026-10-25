@@ -2,7 +2,7 @@
 
 A light, fast, open-source download manager for **Windows and Linux**, written in Rust.
 
-**Status:** early development. M5 done (browser bridge: native messaging host + `register-browsers`). M4: background daemon, `add`/`list`/`watch`. M3: up to 8 connections per file with dynamic splitting,
+**Status:** early development. M6 done for Chromium browsers (extension tested in Brave on Windows and Chrome on Linux; Firefox/Zen and Alt+click still open). M5: browser bridge. M4: background daemon, `add`/`list`/`watch`. M3: up to 8 connections per file with dynamic splitting,
 slow-tail racing, retries and a speed limit; resumes byte-exact after `kill -9`. See [benchmarks](docs/benchmarks.md).
 
 ## Try it
