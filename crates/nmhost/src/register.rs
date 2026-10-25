@@ -1,7 +1,7 @@
 //! Tell browsers where the native messaging host is (SPEC-browser-capture §6).
 //! Linux: a JSON manifest in each installed browser's `NativeMessagingHosts` folder.
 //! Windows: the manifests live in Slipstream's data folder, and a registry value
-//! under HKCU points each browser at them (Brave and Vivaldi read Chrome's key).
+//! under HKCU points each browser at them.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -155,10 +155,20 @@ pub fn unregister(_data_dir: &Path, home: &Path) -> io::Result<Vec<String>> {
 
 /// (browser, registry key holding host names, Firefox-style manifest?)
 #[cfg(windows)]
-const KEYS: [(&str, &str, bool); 4] = [
+const KEYS: [(&str, &str, bool); 6] = [
     (
-        "Chrome, Brave, Vivaldi",
+        "Chrome",
         r"HKCU\Software\Google\Chrome\NativeMessagingHosts",
+        false,
+    ),
+    (
+        "Brave",
+        r"HKCU\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts",
+        false,
+    ),
+    (
+        "Vivaldi",
+        r"HKCU\Software\Vivaldi\NativeMessagingHosts",
         false,
     ),
     (
