@@ -35,6 +35,9 @@ component Field inherits HorizontalLayout {
 
 export component MainWindow inherits Window {
     title: "Slipstream";
+    // Solid background: Windows 11 would otherwise leave it see-through for a "Mica"
+    // effect that the CPU renderer never draws.
+    background: Palette.background;
     icon: @image-url("icon.png");
     preferred-width: 960px;
     preferred-height: 520px;
@@ -352,6 +355,7 @@ export component MainWindow inherits Window {
 
 export component CaughtPopup inherits Window {
     title: "Slipstream";
+    background: Palette.background;
     icon: @image-url("icon.png");
     always-on-top: true;
     width: 440px;
