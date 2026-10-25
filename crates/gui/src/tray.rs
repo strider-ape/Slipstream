@@ -59,6 +59,11 @@ impl Tray {
     }
 }
 
+/// The Windows tray is always there once created.
+pub fn shown() -> bool {
+    true
+}
+
 fn show(ui: &Weak<MainWindow>) {
     if let Some(ui) = ui.upgrade() {
         let _ = ui.show();

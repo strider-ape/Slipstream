@@ -24,3 +24,7 @@ winresource.workspace = true
 tray-icon = "0.26.1"
 raw-window-handle = "0.6.2"
 windows-sys = { version = "0.61.2", features = ["Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }
+
+[target."cfg(target_os = \"linux\")".dependencies]
+ksni = "0.3.7"
+png = "0.18.1"
