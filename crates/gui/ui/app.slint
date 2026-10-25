@@ -1,5 +1,13 @@
 // Slipstream's windows: the download list and the "download caught" popup.
-import { Button, CheckBox, ComboBox, LineEdit, ListView, Palette, ProgressIndicator } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, ListView, Palette } from "std-widgets.slint";
+
+// Our own solid colours: the style's background is see-through on Windows 11 (for a
+// "Mica" effect the CPU renderer never draws).
+global Theme {
+    out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
+    out property <color> bg: dark ? #1f1f1f : #f9f9f9;
+    out property <color> track: dark ? #3a3a3a : #dedede;
+}
 
 export struct DownloadRow {
     id: int,
@@ -35,9 +43,7 @@ component Field inherits HorizontalLayout {
 
 export component MainWindow inherits Window {
     title: "Slipstream";
-    // Solid background: Windows 11 would otherwise leave it see-through for a "Mica"
-    // effect that the CPU renderer never draws.
-    background: Palette.background;
+    background: Theme.bg;
     icon: @image-url("icon.png");
     preferred-width: 960px;
     preferred-height: 520px;
@@ -70,7 +76,7 @@ export component MainWindow inherits Window {
         width: min(root.width - 16px, 560px);
         close-policy: close-on-click-outside;
         Rectangle {
-            background: Palette.background;
+            background: Theme.bg;
             border-color: Palette.border;
             border-width: 1px;
             border-radius: 6px;
@@ -118,7 +124,7 @@ export component MainWindow inherits Window {
         width: min(root.width - 16px, 520px);
         close-policy: close-on-click-outside;
         Rectangle {
-            background: Palette.background;
+            background: Theme.bg;
             border-color: Palette.border;
             border-width: 1px;
             border-radius: 6px;
@@ -289,10 +295,17 @@ export component MainWindow inherits Window {
                         width: 150px;
                         spacing: 6px;
                         alignment: center;
-                        ProgressIndicator {
-                            progress: row.progress;
+                        Rectangle {
                             height: 8px;
                             horizontal-stretch: 1;
+                            border-radius: 4px;
+                            background: Theme.track;
+                            Rectangle {
+                                x: 0;
+                                width: parent.width * clamp(row.progress, 0, 1);
+                                border-radius: 4px;
+                                background: Palette.accent-background;
+                            }
                         }
                         Cell {
                             text: Math.round(row.progress * 100) + "%";
@@ -355,7 +368,7 @@ export component MainWindow inherits Window {
 
 export component CaughtPopup inherits Window {
     title: "Slipstream";
-    background: Palette.background;
+    background: Theme.bg;
     icon: @image-url("icon.png");
     always-on-top: true;
     width: 440px;
