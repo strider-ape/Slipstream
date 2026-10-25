@@ -4959,6 +4959,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "pin-weak",
+ "raw-window-handle",
  "slint-macros",
  "unicode-segmentation",
  "vtable",
@@ -5027,11 +5028,13 @@ dependencies = [
 name = "slipstream-gui"
 version = "0.2.0"
 dependencies = [
+ "raw-window-handle",
  "slint",
  "slint-build",
  "slipstream-core",
  "tokio",
  "tray-icon",
+ "windows-sys 0.61.2",
  "winresource",
 ]
 

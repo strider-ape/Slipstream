@@ -12,7 +12,7 @@ name = "slipstream-gui"
 path = "src/main.rs"
 
 [dependencies]
-slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility"] }
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "accessibility", "raw-window-handle-06"] }
 slipstream-core.workspace = true
 tokio = { version = "1.54.1", features = ["rt", "macros", "time", "sync"] }
 
@@ -22,3 +22,5 @@ winresource.workspace = true
 
 [target."cfg(windows)".dependencies]
 tray-icon = "0.26.1"
+raw-window-handle = "0.6.2"
+windows-sys = { version = "0.61.2", features = ["Win32_System_LibraryLoader", "Win32_UI_WindowsAndMessaging"] }

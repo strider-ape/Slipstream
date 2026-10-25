@@ -112,6 +112,7 @@ fn run(ui: &MainWindow) -> Result<(), slint::PlatformError> {
     ui.window()
         .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
     ui.show()?;
+    tray::taskbar_icon(ui.window());
     slint::run_event_loop_until_quit()
 }
 
@@ -266,6 +267,8 @@ pub fn show_caught(popup: &CaughtPopup, d: DownloadInfo) {
     popup.set_name(name.into());
     popup.set_info(format!("{size}  →  {}", d.dir.display()).into());
     let _ = popup.show();
+    #[cfg(windows)]
+    tray::taskbar_icon(popup.window());
 }
 
 /// Show the file in the system file manager.

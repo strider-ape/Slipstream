@@ -69,3 +69,40 @@ fn show(ui: &Weak<MainWindow>) {
 fn icon() -> Result<Icon, String> {
     Icon::from_resource(1, None).map_err(|e| e.to_string())
 }
+
+/// Give a window the large icon from the .exe as well. Slint only sets the small
+/// title-bar one; the taskbar and Alt+Tab use the large one.
+pub fn taskbar_icon(window: &slint::Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, ICON_BIG, IMAGE_ICON, LR_SHARED, LoadImageW, SM_CXICON, SM_CYICON,
+        SendMessageW, WM_SETICON,
+    };
+
+    let Ok(handle) = window.window_handle().window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(h) = handle.as_raw() else {
+        return;
+    };
+    // SAFETY: plain Win32 calls on our own window; resource 1 is the icon build.rs embeds.
+    unsafe {
+        let icon = LoadImageW(
+            GetModuleHandleW(std::ptr::null()),
+            1 as _,
+            IMAGE_ICON,
+            GetSystemMetrics(SM_CXICON),
+            GetSystemMetrics(SM_CYICON),
+            LR_SHARED,
+        );
+        if !icon.is_null() {
+            SendMessageW(
+                h.hwnd.get() as _,
+                WM_SETICON,
+                ICON_BIG as usize,
+                icon as isize,
+            );
+        }
+    }
+}
