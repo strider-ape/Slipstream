@@ -17,7 +17,7 @@ use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use serde::Deserialize;
 use tokio::net::TcpListener;
@@ -121,6 +121,8 @@ fn router_with(shared: Arc<Shared>) -> Router {
         .route("/protected/{name}", get(protected))
         .route("/redirect/{hops}/{name}", get(redirect))
         .route("/generate", post(generate))
+        .route("/page", get(page))
+        .route("/login", get(login))
         .with_state(shared)
 }
 
@@ -199,6 +201,21 @@ async fn protected(
         return (StatusCode::FORBIDDEN, "login required").into_response();
     }
     file(state, name, opts, uri, req).await
+}
+
+/// A page of download links for trying the browser extension by hand.
+async fn page() -> Html<&'static str> {
+    Html(include_str!("page.html"))
+}
+
+/// "Logs in": sets the cookie `/protected/...` wants, then goes back to the page.
+async fn login() -> Response {
+    let cookie = format!("{SESSION_COOKIE}; Path=/");
+    let headers = [
+        (header::SET_COOKIE, cookie),
+        (header::LOCATION, "/page".to_owned()),
+    ];
+    (StatusCode::SEE_OTHER, headers).into_response()
 }
 
 /// `/redirect/3/x` → `/redirect/2/x` → `/redirect/1/x` → `/file/x`, keeping the query.

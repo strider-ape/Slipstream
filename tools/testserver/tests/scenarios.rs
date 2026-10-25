@@ -254,3 +254,24 @@ async fn redirect_chain() {
     assert_eq!(res.url().path(), "/file/r.bin");
     assert!(res.bytes().await.unwrap() == expected("r.bin", 1000));
 }
+
+#[tokio::test]
+async fn test_page_and_login() {
+    let base = server().await;
+    let page = get(&format!("{base}/page"), &[])
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(page.contains("/protected/members-only.zip"), "{page}");
+
+    let no_follow = Client::builder()
+        .redirect(redirect::Policy::none())
+        .build()
+        .unwrap();
+    let res = no_follow.get(format!("{base}/login")).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    assert_eq!(res.headers()[LOCATION], "/page");
+    let cookie = res.headers()[reqwest::header::SET_COOKIE].to_str().unwrap();
+    assert!(cookie.starts_with(testserver::SESSION_COOKIE), "{cookie}");
+}

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slipstream test page</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }
+  li { margin: .6rem 0; }
+  code, kbd { background: #8882; padding: 0 .3em; border-radius: 4px; }
+  .note { color: #888; }
+</style>
+<h1>Slipstream test page</h1>
+<p class="note">Served by the local test server. Each link should behave as described;
+check with <code>slipstream list</code>.</p>
+<ol>
+  <li><a href="/file/test-archive.zip?size=20000000&throttle=2000000&attachment=true">test-archive.zip</a>
+    (20 MB): a plain click → Slipstream takes it, the browser's download disappears.</li>
+  <li><a href="/file/manual.pdf?size=3000000&attachment=true">manual.pdf</a> (3 MB): taken too.</li>
+  <li><a href="/file/notes.csv?size=50000&attachment=true">notes.csv</a>: not in the list of types →
+    the browser keeps it. <kbd>Alt</kbd>+click → Slipstream takes it anyway.</li>
+  <li>The zip from 1 with <kbd>Ctrl</kbd>+click (or <kbd>Cmd</kbd>) → the browser keeps it.</li>
+  <li>Right-click any link → <em>Download with Slipstream</em>.</li>
+  <li><a href="/login">Log in</a> (sets a session cookie), then
+    <a href="/protected/members-only.zip?size=5000000&attachment=true">members-only.zip</a>:
+    Slipstream downloads it with the browser's cookie (it gets 403 without).</li>
+  <li><form method="post" action="/generate" style="display:inline">
+    <button>Export report (POST)</button></form>: made by a form POST → the browser keeps it
+    (Slipstream can only repeat plain GET downloads so far).</li>
+</ol>
+<p class="note">Stop the daemon (<code>slipstream daemon stop</code>) and click 1 again: the browser
+should get the download back within about 3 seconds.</p>
+</html>
