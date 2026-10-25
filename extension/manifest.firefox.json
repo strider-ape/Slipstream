@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Slipstream",
+  "version": "0.2.0",
+  "description": "Hands your browser downloads to the Slipstream download manager, with the cookies they need.",
+  "browser_specific_settings": {
+    "gecko": { "id": "slipstream@strider-ape.github.io", "strict_min_version": "128.0" }
+  },
+  "background": { "scripts": ["rules.js", "background.js"] },
+  "permissions": ["downloads", "webRequest", "cookies", "contextMenus", "nativeMessaging"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content.js"], "all_frames": true, "run_at": "document_start" }
+  ],
+  "action": { "default_title": "Slipstream" }
+}

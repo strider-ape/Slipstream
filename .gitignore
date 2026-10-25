@@ -14,3 +14,6 @@ Thumbs.db
 
 # Claude local notes
 CLAUDE.local.md
+
+# built extension bundles
+extension/dist/

@@ -29,3 +29,19 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+
+  extension:
+    name: extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Rule tests
+        run: node --test extension/test/rules.test.js
+      - name: Syntax check
+        run: for f in extension/src/*.js; do node --check "$f"; done
+      - name: Build and check manifests
+        run: |
+          bash extension/build.sh
+          for b in chrome firefox; do
+            node -e "const m = require('./extension/dist/$b/manifest.json'); if (m.manifest_version !== 3) process.exit(1); console.log('$b', m.version)"
+          done
