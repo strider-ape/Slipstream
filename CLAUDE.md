@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 ## Project
-`slipstream`: a light, fast, open-source download manager for **Windows and Linux**, written in **Rust**. License: GPL-3.0.
+`slipstream`: a light, fast, open-source download manager for **Linux and Windows**, written in **Rust**. License: GPL-3.0.
 v1 = (1) multi-connection segmented download engine with resume, (2) catching downloads from Chrome/Edge/Firefox via a WebExtension + native messaging host. Nothing else until the user decides on v2.
 
 ## Specs (source of truth)

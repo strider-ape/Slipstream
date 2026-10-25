@@ -1,6 +1,6 @@
 # ROADMAP: v1 = fast segmented engine + browser catching
 
-Work milestone by milestone. Each one ends with a demo the user can run, tests passing on **Windows and Linux (WSL2)**, and a commit. Explain what was built and why in simple words.
+Work milestone by milestone. Each one ends with a demo the user can run, tests passing on **Linux (WSL2) and Windows**, and a commit. Explain what was built and why in simple words.
 
 | # | Milestone | Done when |
 |---|---|---|

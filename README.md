@@ -2,7 +2,7 @@
 
 <h1 align="center">Slipstream</h1>
 
-<p align="center">A light, fast, open-source download manager for <b>Windows and Linux</b>, written in Rust.</p>
+<p align="center">A light, fast, open-source download manager for <b>Linux and Windows</b>, written in Rust.</p>
 
 <p align="center">
   <a href="https://github.com/strider-ape/Slipstream/releases">Download</a> ·

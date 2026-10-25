@@ -25,7 +25,7 @@ Same URL, same network, 3 runs each, median:
 - Suggested URLs: a big Ubuntu ISO from a nearby mirror, a provider speed-test file (e.g. a Hetzner/OVH/Linode 1 GB test file), a GitHub release asset (redirect to a CDN).
 
 ## C. Browser catching matrix
-Chrome, Edge and Firefox × Windows and Linux (WSLg):
+Chrome, Edge and Firefox × Linux and Windows (WSLg):
 - plain link click, Alt+click (force), Ctrl+click (prevent), context menu item;
 - link behind login (cookie), POST form download, daemon stopped (fallback), incognito/private window.
 
