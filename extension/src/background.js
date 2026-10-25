@@ -20,6 +20,11 @@ let lastKeys = { force: false, prevent: false, at: 0 };
 const decisions = new Map(); // download id -> Promise<'take' | 'release'>
 const requests = new Map(); // url -> { method, mime, size, at }, from webRequest
 
+// One line per decision in the extension's console (service worker / background page).
+function log(...parts) {
+  console.info('[slipstream]', ...parts);
+}
+
 // ---- connection to the app ------------------------------------------------------------
 
 function connect() {
@@ -113,7 +118,10 @@ async function decide(item) {
   const url = item.finalUrl || item.url;
   const seen = requests.get(url) || requests.get(item.url) || {};
   // Downloads made by a form POST can't be repeated by the app yet.
-  if (seen.method && seen.method !== 'GET') return 'release';
+  if (seen.method && seen.method !== 'GET') {
+    log('browser keeps it', `made by ${seen.method}`, url);
+    return 'release';
+  }
   const d = {
     url,
     filename: item.filename || '',
@@ -122,6 +130,7 @@ async function decide(item) {
     incognito: !!item.incognito,
   };
   const verdict = SlipstreamRules.decide(d, await ensureSettings(), keys);
+  log(verdict.take ? 'asking the app' : 'browser keeps it', verdict.why, url, keys);
   if (!verdict.take) return 'release';
   const reply = await ask({
     source: 'download',
@@ -136,6 +145,7 @@ async function decide(item) {
     incognito: d.incognito,
     modifiers: keys,
   });
+  log('app answered', reply.action || reply.message, url);
   if (reply.type === 'verdict') return reply.action === 'take' ? 'take' : 'release';
   setStatus(false, reply.message);
   return 'release';
@@ -209,7 +219,10 @@ ext.webRequest.onHeadersReceived.addListener(
 
 // The content script reports Alt/Ctrl held on a link click.
 ext.runtime.onMessage.addListener(msg => {
-  if (msg && msg.type === 'keys') lastKeys = { force: !!msg.force, prevent: !!msg.prevent, at: Date.now() };
+  if (msg && msg.type === 'keys') {
+    lastKeys = { force: !!msg.force, prevent: !!msg.prevent, at: Date.now() };
+    log('keys held on a link click', lastKeys);
+  }
 });
 
 // ---- right-click menu -----------------------------------------------------------------
@@ -221,6 +234,7 @@ ext.runtime.onInstalled.addListener(() => {
 
 ext.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId !== 'slipstream-link' || !info.linkUrl) return;
+  log('right-click menu', info.linkUrl);
   if (tab && tab.incognito) return flash('!', '#c62828'); // private windows stay private
   const reply = await ask({
     source: 'context',
