@@ -80,7 +80,8 @@ pub fn taskbar_icon(window: &slint::Window) {
         SendMessageW, WM_SETICON,
     };
 
-    let Ok(handle) = window.window_handle().window_handle() else {
+    let slint_handle = window.window_handle();
+    let Ok(handle) = slint_handle.window_handle() else {
         return;
     };
     let RawWindowHandle::Win32(h) = handle.as_raw() else {
