@@ -1,0 +1,409 @@
+// Slipstream's windows: the download list and the "download caught" popup.
+import { Button, CheckBox, ComboBox, LineEdit, ListView, Palette, ProgressIndicator } from "std-widgets.slint";
+
+export struct DownloadRow {
+    id: int,
+    name: string,
+    size: string,
+    progress: float,
+    speed: string,
+    eta: string,
+    status: string,
+}
+
+// One piece of the selected download, as fractions of the bar's width.
+export struct SegmentBar {
+    x: float,
+    w: float,
+    fill: float,
+}
+
+component Cell inherits Text {
+    vertical-alignment: center;
+    overflow: elide;
+}
+
+component Field inherits HorizontalLayout {
+    in property <string> label;
+    spacing: 8px;
+    Text {
+        text: label;
+        vertical-alignment: center;
+        min-width: 150px;
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "Slipstream";
+    icon: @image-url("icon.png");
+    preferred-width: 960px;
+    preferred-height: 520px;
+    min-width: 640px;
+    min-height: 320px;
+
+    in property <[DownloadRow]> rows;
+    in property <[SegmentBar]> segments;
+    in property <string> details;
+    in property <string> status-text;
+    in-out property <int> selected-id: -1;
+
+    // Settings form
+    in-out property <string> s-folder;
+    in-out property <int> s-connections-index;
+    in-out property <string> s-limit;
+    in-out property <bool> s-catch;
+
+    callback add-url(string);
+    callback pause(int);
+    callback resume(int);
+    callback remove(int);
+    callback open-folder(int);
+    callback selection-changed(int);
+    callback save-settings();
+
+    add-popup := PopupWindow {
+        x: 8px;
+        y: 44px;
+        width: min(root.width - 16px, 560px);
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Palette.background;
+            border-color: Palette.border;
+            border-width: 1px;
+            border-radius: 6px;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                Text {
+                    text: "Download a link";
+                    font-weight: 600;
+                }
+                url := LineEdit {
+                    placeholder-text: "https://…";
+                    accepted => {
+                        root.add-url(self.text);
+                        self.text = "";
+                        add-popup.close();
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Button {
+                        text: "Cancel";
+                        clicked => {
+                            add-popup.close();
+                        }
+                    }
+                    Button {
+                        text: "Download";
+                        primary: true;
+                        clicked => {
+                            root.add-url(url.text);
+                            url.text = "";
+                            add-popup.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    settings-popup := PopupWindow {
+        x: root.width - min(root.width - 16px, 520px) - 8px;
+        y: 44px;
+        width: min(root.width - 16px, 520px);
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Palette.background;
+            border-color: Palette.border;
+            border-width: 1px;
+            border-radius: 6px;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 10px;
+                Text {
+                    text: "Settings";
+                    font-weight: 600;
+                }
+                Field {
+                    label: "Download folder";
+                    LineEdit {
+                        text <=> root.s-folder;
+                    }
+                }
+                Field {
+                    label: "Connections per file";
+                    ComboBox {
+                        model: ["1", "2", "4", "8", "16", "24", "32"];
+                        current-index <=> root.s-connections-index;
+                    }
+                }
+                Field {
+                    label: "Speed limit";
+                    LineEdit {
+                        placeholder-text: "none, or e.g. 500K, 2M";
+                        text <=> root.s-limit;
+                    }
+                }
+                CheckBox {
+                    text: "Catch downloads from the browser";
+                    checked <=> root.s-catch;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Button {
+                        text: "Cancel";
+                        clicked => {
+                            settings-popup.close();
+                        }
+                    }
+                    Button {
+                        text: "Save";
+                        primary: true;
+                        clicked => {
+                            root.save-settings();
+                            settings-popup.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    VerticalLayout {
+        padding: 6px;
+        spacing: 6px;
+
+        HorizontalLayout {
+            spacing: 6px;
+            Button {
+                text: "+ Add URL";
+                primary: true;
+                clicked => {
+                    add-popup.show();
+                }
+            }
+            Button {
+                text: "Pause";
+                enabled: root.selected-id >= 0;
+                clicked => {
+                    root.pause(root.selected-id);
+                }
+            }
+            Button {
+                text: "Resume";
+                enabled: root.selected-id >= 0;
+                clicked => {
+                    root.resume(root.selected-id);
+                }
+            }
+            Button {
+                text: "Delete";
+                enabled: root.selected-id >= 0;
+                clicked => {
+                    root.remove(root.selected-id);
+                }
+            }
+            Button {
+                text: "Open folder";
+                enabled: root.selected-id >= 0;
+                clicked => {
+                    root.open-folder(root.selected-id);
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+            Button {
+                text: "Settings";
+                clicked => {
+                    settings-popup.show();
+                }
+            }
+        }
+
+        Rectangle {
+            height: 26px;
+            background: Palette.alternate-background;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 8px;
+                Cell {
+                    text: "Name";
+                    font-weight: 600;
+                    horizontal-stretch: 1;
+                }
+                Cell {
+                    text: "Size";
+                    font-weight: 600;
+                    width: 80px;
+                }
+                Cell {
+                    text: "Done";
+                    font-weight: 600;
+                    width: 150px;
+                }
+                Cell {
+                    text: "Speed";
+                    font-weight: 600;
+                    width: 90px;
+                }
+                Cell {
+                    text: "ETA";
+                    font-weight: 600;
+                    width: 60px;
+                }
+                Cell {
+                    text: "Status";
+                    font-weight: 600;
+                    width: 100px;
+                }
+            }
+        }
+
+        ListView {
+            vertical-stretch: 1;
+            for row[i] in root.rows: Rectangle {
+                height: 28px;
+                background: row.id == root.selected-id ? Palette.selection-background : Math.mod(i, 2) == 1 ? Palette.alternate-background : transparent;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    Cell {
+                        text: row.name;
+                        horizontal-stretch: 1;
+                        color: row.id == root.selected-id ? Palette.selection-foreground : Palette.foreground;
+                    }
+                    Cell {
+                        text: row.size;
+                        width: 80px;
+                    }
+                    HorizontalLayout {
+                        width: 150px;
+                        spacing: 6px;
+                        alignment: center;
+                        ProgressIndicator {
+                            progress: row.progress;
+                            height: 8px;
+                            horizontal-stretch: 1;
+                        }
+                        Cell {
+                            text: Math.round(row.progress * 100) + "%";
+                            width: 36px;
+                        }
+                    }
+                    Cell {
+                        text: row.speed;
+                        width: 90px;
+                    }
+                    Cell {
+                        text: row.eta;
+                        width: 60px;
+                    }
+                    Cell {
+                        text: row.status;
+                        width: 100px;
+                    }
+                }
+                TouchArea {
+                    clicked => {
+                        root.selected-id = row.id;
+                        root.selection-changed(row.id);
+                    }
+                }
+            }
+        }
+
+        Cell {
+            text: root.details;
+            height: 20px;
+        }
+
+        // The selected download's segments: one block per piece, filled as it arrives.
+        Rectangle {
+            height: 18px;
+            border-radius: 3px;
+            background: Palette.alternate-background;
+            for s in root.segments: Rectangle {
+                x: parent.width * s.x;
+                y: 2px;
+                width: max(parent.width * s.w - 1px, 1px);
+                height: parent.height - 4px;
+                Rectangle {
+                    x: 0;
+                    width: parent.width * s.fill;
+                    border-radius: 2px;
+                    background: Palette.accent-background;
+                }
+            }
+        }
+
+        Text {
+            text: root.status-text;
+            color: Palette.foreground;
+            font-size: 11px;
+        }
+    }
+}
+
+export component CaughtPopup inherits Window {
+    title: "Slipstream";
+    icon: @image-url("icon.png");
+    always-on-top: true;
+    width: 440px;
+    height: 150px;
+
+    in property <string> name;
+    in property <string> info;
+    callback open-folder();
+    callback cancel-download();
+    callback dismiss();
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 6px;
+        Text {
+            text: "Download caught from the browser";
+            font-weight: 700;
+        }
+        Text {
+            text: root.name;
+            overflow: elide;
+        }
+        Text {
+            text: root.info;
+            overflow: elide;
+            opacity: 0.75;
+        }
+        Rectangle {
+            vertical-stretch: 1;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            Button {
+                text: "Cancel download";
+                clicked => {
+                    root.cancel-download();
+                }
+            }
+            Button {
+                text: "Open folder";
+                clicked => {
+                    root.open-folder();
+                }
+            }
+            Button {
+                text: "OK";
+                primary: true;
+                clicked => {
+                    root.dismiss();
+                }
+            }
+        }
+    }
+}

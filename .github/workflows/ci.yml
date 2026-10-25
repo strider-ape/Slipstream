@@ -23,6 +23,9 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: Linux GUI libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libfontconfig1-dev libxkbcommon-dev
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
