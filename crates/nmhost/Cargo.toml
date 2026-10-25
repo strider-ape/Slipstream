@@ -21,3 +21,6 @@ tokio = { version = "1.54.1", features = ["rt", "macros", "io-std", "io-util"] }
 slipstream-daemon = { path = "../daemon" }
 testserver = { path = "../../tools/testserver" }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "process", "time"] }
+
+[build-dependencies]
+winresource.workspace = true

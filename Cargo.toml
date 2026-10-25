@@ -19,6 +19,7 @@ repository = "https://github.com/strider-ape/Slipstream"
 
 [workspace.dependencies]
 slipstream-core = { path = "crates/core" }
+winresource = "0.1"
 
 # Small, fast release binaries: whole-program optimisation, no debug symbols.
 [profile.release]

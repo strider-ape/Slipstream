@@ -65,24 +65,7 @@ fn show(ui: &Weak<MainWindow>) {
     }
 }
 
-/// The app icon at 32×32, drawn in code: blue circle with a white download arrow.
+/// The app icon that build.rs put into the .exe (resource 1, all sizes).
 fn icon() -> Result<Icon, String> {
-    const N: u32 = 32;
-    let mut rgba = Vec::with_capacity((N * N * 4) as usize);
-    for y in 0..N {
-        for x in 0..N {
-            let (fx, fy) = (x as f32 + 0.5 - 16.0, y as f32 + 0.5 - 16.0);
-            let inside = fx * fx + fy * fy <= 15.0 * 15.0;
-            let shaft = fx.abs() <= 1.8 && (-9.0..=2.0).contains(&fy);
-            let head = (0.0..=7.0).contains(&fy) && fx.abs() <= 7.0 - fy;
-            let base = (9.0..=11.0).contains(&fy) && fx.abs() <= 8.0;
-            let px = match (inside, shaft || head || base) {
-                (true, true) => [255, 255, 255, 255],
-                (true, false) => [37, 99, 235, 255],
-                _ => [0, 0, 0, 0],
-            };
-            rgba.extend_from_slice(&px);
-        }
-    }
-    Icon::from_rgba(rgba, N, N).map_err(|e| e.to_string())
+    Icon::from_resource(1, None).map_err(|e| e.to_string())
 }

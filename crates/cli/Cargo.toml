@@ -34,7 +34,10 @@ assets = [
     ["target/release/slipstream-nmhost", "usr/bin/", "755"],
     ["target/release/slipstream-gui", "usr/bin/", "755"],
     ["../../packaging/linux/slipstream.desktop", "usr/share/applications/", "644"],
-    ["../gui/ui/icon.png", "usr/share/icons/hicolor/128x128/apps/slipstream.png", "644"],
+    ["../../assets/icons/slipstream-48.png", "usr/share/icons/hicolor/48x48/apps/slipstream.png", "644"],
+    ["../../assets/icons/slipstream-128.png", "usr/share/icons/hicolor/128x128/apps/slipstream.png", "644"],
+    ["../../assets/icons/slipstream-256.png", "usr/share/icons/hicolor/256x256/apps/slipstream.png", "644"],
+    ["../../assets/icon.svg", "usr/share/icons/hicolor/scalable/apps/slipstream.svg", "644"],
     # System-wide browser registration: no per-user step needed.
     ["../../packaging/linux/chromium-host.json", "etc/opt/chrome/native-messaging-hosts/org.slipstream.host.json", "644"],
     ["../../packaging/linux/chromium-host.json", "etc/chromium/native-messaging-hosts/org.slipstream.host.json", "644"],
@@ -42,3 +45,6 @@ assets = [
     ["../../packaging/linux/firefox-host.json", "usr/lib/mozilla/native-messaging-hosts/org.slipstream.host.json", "644"],
     ["../../README.md", "usr/share/doc/slipstream/", "644"],
 ]
+
+[build-dependencies]
+winresource.workspace = true

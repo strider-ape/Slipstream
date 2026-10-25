@@ -19,3 +19,6 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal",
 
 [dev-dependencies]
 testserver = { path = "../../tools/testserver" }
+
+[build-dependencies]
+winresource.workspace = true
