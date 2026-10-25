@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use slipstream_core::download::{self, Error as DownloadError, Outcome, Progress};
 use slipstream_core::ipc::{
-    self, AddRequest, CaptureSettings, DownloadInfo, Listener, Paths, Request, Response, Status,
-    Stream,
+    self, AddRequest, AppSettings, CaptureSettings, DownloadInfo, Listener, Paths, Request,
+    Response, Status, Stream,
 };
 use slipstream_core::storage::{part_path, sidecar_path};
 use tokio::io::BufReader;
@@ -113,6 +113,7 @@ struct Live {
     downloaded: u64,
     speed: u64,
     connections: usize,
+    segments: Vec<[u64; 3]>,
 }
 
 impl Daemon {
@@ -136,6 +137,8 @@ impl Daemon {
                 Ok(Response::Ok)
             }
             Request::CaptureSettings => Ok(Response::CaptureSettings(self.capture_settings())),
+            Request::GetSettings => Ok(Response::Settings(self.app_settings())),
+            Request::SetSettings(s) => self.set_app_settings(s),
         };
         result.unwrap_or_else(|message| Response::Error { message })
     }
@@ -143,16 +146,50 @@ impl Daemon {
     /// Saved capture rules (`settings` key "capture"), or the defaults.
     fn capture_settings(&self) -> CaptureSettings {
         let saved = self.db().setting("capture").ok().flatten();
-        saved
+        let mut rules: CaptureSettings = saved
             .and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        rules.enabled &= self.app_settings().catch_enabled;
+        rules
     }
 
-    fn add(self: &Arc<Self>, req: AddRequest) -> Result<Response, String> {
+    /// Saved preferences (`settings` key "app"), or the defaults.
+    fn app_settings(&self) -> AppSettings {
+        let saved = self.db().setting("app").ok().flatten();
+        saved
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_else(|| AppSettings {
+                download_dir: self.default_dir.clone(),
+                max_connections: 8,
+                speed_limit: 0,
+                catch_enabled: true,
+            })
+    }
+
+    fn set_app_settings(&self, s: AppSettings) -> Result<Response, String> {
+        if !(1..=32).contains(&s.max_connections) {
+            return Err("connections must be between 1 and 32".into());
+        }
+        let json = serde_json::to_string(&s).map_err(|e| e.to_string())?;
+        self.db()
+            .set_setting("app", &json)
+            .map_err(|e| e.to_string())?;
+        Ok(Response::Ok)
+    }
+
+    fn add(self: &Arc<Self>, mut req: AddRequest) -> Result<Response, String> {
         if !(req.url.starts_with("http://") || req.url.starts_with("https://")) {
             return Err(format!("not an http(s) URL: {}", req.url));
         }
-        let dir = req.dir.clone().unwrap_or_else(|| self.default_dir.clone());
+        // Whatever the request leaves open comes from the settings.
+        let app = self.app_settings();
+        let dir = req.dir.clone().unwrap_or_else(|| app.download_dir.clone());
+        if req.connections == 0 {
+            req.connections = app.max_connections;
+        }
+        if req.speed_limit == 0 {
+            req.speed_limit = app.speed_limit;
+        }
         // Two downloads of one URL into one folder would share a part file.
         let list = self.db().list().map_err(|e| e.to_string())?;
         if let Some(d) = list
@@ -306,6 +343,7 @@ impl Daemon {
                 d.downloaded = l.downloaded.max(d.downloaded);
                 d.speed = l.speed;
                 d.connections = l.connections;
+                d.segments = l.segments.clone();
             }
         }
         Ok(list)
@@ -340,6 +378,7 @@ impl Meter {
         l.downloaded = p.downloaded;
         l.speed = self.speed as u64;
         l.connections = p.connections;
+        l.segments = p.segments;
     }
 }
 

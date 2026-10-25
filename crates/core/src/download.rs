@@ -49,6 +49,8 @@ pub struct Progress {
     pub connections: usize,
     /// File name being written (set once the name is decided).
     pub name: Option<String>,
+    /// Every segment as `[start, end, done]` (for the segment bar).
+    pub segments: Vec<[u64; 3]>,
 }
 
 #[derive(Debug)]
@@ -281,6 +283,7 @@ pub async fn download(
         size: state.validator.size,
         connections: 0,
         name: None,
+        segments: state.segment_view(),
     });
 
     // Finalize: everything is on disk → check the size, rename, drop the sidecar.
@@ -557,6 +560,7 @@ async fn receive(
                 size: state.validator.size,
                 connections: 1,
                 name: None,
+                segments: state.segment_view(),
             });
             last_tick = Instant::now();
         }

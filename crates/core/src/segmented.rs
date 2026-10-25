@@ -330,6 +330,7 @@ pub(crate) async fn run(
                     size: Some(ctx.size),
                     connections: workers.len(),
                     name: None,
+                    segments: ctx.shared.lock().unwrap().state.segment_view(),
                 });
                 if now.duration_since(last_save) >= SAVE_EVERY {
                     if let Err(e) = save(&ctx, job.sidecar) {

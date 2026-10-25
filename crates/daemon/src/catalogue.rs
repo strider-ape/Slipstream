@@ -180,6 +180,7 @@ fn info(r: &Row<'_>) -> rusqlite::Result<DownloadInfo> {
         speed: 0,
         connections: 0,
         error: r.get(7)?,
+        segments: Vec::new(),
     })
 }
 

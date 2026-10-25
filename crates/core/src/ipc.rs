@@ -38,6 +38,8 @@ pub enum Request {
     Shutdown,
     /// What the browser extension should catch (sent to it on connect).
     CaptureSettings,
+    GetSettings,
+    SetSettings(AppSettings),
 }
 
 /// Rules for which browser downloads Slipstream catches. Kept by the daemon and
@@ -87,6 +89,18 @@ pub struct AddRequest {
     pub speed_limit: u64,
 }
 
+/// User preferences, kept by the daemon (the GUI's Settings window).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AppSettings {
+    pub download_dir: PathBuf,
+    /// Most connections per download (1..=32).
+    pub max_connections: usize,
+    /// Bytes/s per download, 0 = unlimited.
+    pub speed_limit: u64,
+    /// Take downloads from the browser.
+    pub catch_enabled: bool,
+}
+
 /// Daemon → client.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -97,6 +111,7 @@ pub enum Response {
     Ok,
     Error { message: String },
     CaptureSettings(CaptureSettings),
+    Settings(AppSettings),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,6 +163,9 @@ pub struct DownloadInfo {
     pub speed: u64,
     pub connections: usize,
     pub error: Option<String>,
+    /// `[start, end, done]` per segment while downloading.
+    #[serde(default)]
+    pub segments: Vec<[u64; 3]>,
 }
 
 /// Where the daemon keeps its data and where it listens.

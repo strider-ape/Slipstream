@@ -96,6 +96,15 @@ impl State {
         }
     }
 
+    /// Every segment as `[start, end, done]`; an open end shows as what arrived.
+    pub fn segment_view(&self) -> Vec<[u64; 3]> {
+        let end = |s: &Segment| s.end.unwrap_or((s.start + s.done).saturating_sub(1));
+        self.segments
+            .iter()
+            .map(|s| [s.start, end(s), s.done])
+            .collect()
+    }
+
     /// Bytes on disk so far.
     pub fn downloaded(&self) -> u64 {
         self.segments.iter().map(|s| s.done).sum()

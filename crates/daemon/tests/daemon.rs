@@ -233,3 +233,41 @@ async fn clear_errors() {
         }
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_apply_to_new_downloads() {
+    let (home, out) = (temp_dir("settings-home"), temp_dir("settings-out"));
+    let base = format!("http://{}", testserver::spawn().await.unwrap());
+    let (paths, _daemon) = start(&home).await;
+    let mut c = Client::connect(&paths).await.unwrap();
+    let Response::Settings(mut s) = c.call(&Request::GetSettings).await.unwrap() else {
+        panic!("no settings")
+    };
+    assert_eq!(
+        (s.max_connections, s.speed_limit, s.catch_enabled),
+        (8, 0, true)
+    );
+    s.download_dir = out.clone();
+    s.catch_enabled = false;
+    assert_eq!(
+        c.call(&Request::SetSettings(s)).await.unwrap(),
+        Response::Ok
+    );
+
+    // No folder in the request: the settings' folder is used.
+    let req = AddRequest {
+        url: format!("{base}/file/s.bin?size=1000"),
+        ..Default::default()
+    };
+    let Response::Added { id } = c.call(&Request::Add(req)).await.unwrap() else {
+        panic!()
+    };
+    wait_for(&mut c, id, |d| d.status == Status::Complete).await;
+    assert_file(&out, "s.bin", 1000);
+
+    // Catching off reaches the browser rules.
+    let Response::CaptureSettings(rules) = c.call(&Request::CaptureSettings).await.unwrap() else {
+        panic!()
+    };
+    assert!(!rules.enabled);
+}
