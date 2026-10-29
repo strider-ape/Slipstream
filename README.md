@@ -16,7 +16,7 @@
 - **Fast downloads.** Splits each file across up to 8 connections and keeps splitting while that makes it faster. It stops adding connections when they no longer help, so it never loses to a single stream on a line one connection already fills. Slow or stuck parts at the end get a second connection racing them.
 - **Never starts over.** Pause, quit, crash or reboot: the download continues from the exact byte where it stopped. If the file changed on the server, it starts clean instead of mixing two versions.
 - **Catches downloads from your browser.** Click a file link in Chrome, Edge, Brave, Vivaldi or Chromium and Slipstream takes it, with the cookies it needs (downloads behind a login work). Right-click any link → *Download with Slipstream*.
-- **Light.** The desktop app uses about 25 MB of RAM; the programs together are under 20 MB. On Windows it waits in the tray.
+- **Light.** The desktop app uses about 25 MB of RAM; the programs together are under 20 MB. It waits in the tray (Windows, and Linux desktops with a tray: KDE, XFCE, Cinnamon, Ubuntu's GNOME).
 - **Private.** No accounts, no telemetry, no network port: the app and its background service talk only to each other, and only for your user.
 
 ## Install
@@ -43,7 +43,7 @@ slipstream add URL [-d DIR]          # hand it to the background service
 slipstream list | watch
 slipstream pause ID | resume ID | remove ID [--delete-file]
 slipstream daemon status | stop
-slipstream autostart on | off        # start the background service at login
+slipstream autostart on | off        # start Slipstream in the tray at login
 slipstream register-browsers | unregister-browsers
 ```
 
@@ -69,7 +69,7 @@ bash extension/build.sh               # extension/dist/chrome and extension/dist
 `tools/testserver` is a local HTTP server that fakes slow, flaky and tricky servers for the tests and benchmarks in `scripts/`.
 
 ## Not yet
-HTTP(S) only for now. Video streams, FTP, proxies, queues and a scheduler come after v1. Also open: Alt+click to force a catch, a Linux tray icon, store listings for the extension, and code signing on Windows.
+HTTP(S) only for now. Video streams, FTP, proxies, queues and a scheduler come after v1. Also open: Alt+click to force a catch, store listings for the extension, and code signing on Windows.
 
 ## License
 [GPL-3.0-or-later](LICENSE)

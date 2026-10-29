@@ -1,6 +1,9 @@
 //! Slipstream desktop app: the download list with add, pause, resume and delete,
 //! settings, and a popup when the browser hands a download over. A client of the
 //! daemon. Drawn on the CPU (Slint's software renderer): no GPU stack is loaded.
+//!
+//!     slipstream-gui          open the window
+//!     slipstream-gui --tray   start in the tray only (how it starts at login)
 
 // No console window on Windows.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -105,18 +108,20 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    run(&ui)
+    let in_tray = std::env::args().skip(1).any(|a| a == "--tray");
+    run(&ui, in_tray)
 }
 
 /// With a tray icon, closing the window hides it there and Quit in the tray menu ends
 /// the app. Without one (say, GNOME without the AppIndicator extension), closing the
 /// window ends the app. Downloads go on in the daemon either way.
-fn run(ui: &MainWindow) -> Result<(), slint::PlatformError> {
+fn run(ui: &MainWindow, in_tray: bool) -> Result<(), slint::PlatformError> {
     let _tray = match tray::Tray::new(ui.as_weak()) {
         Ok(tray) => tray,
         Err(e) => {
             eprintln!("no tray icon: {e}");
-            return ui.run();
+            show(ui);
+            return slint::run_event_loop();
         }
     };
     ui.window().on_close_requested(|| {
@@ -125,10 +130,27 @@ fn run(ui: &MainWindow) -> Result<(), slint::PlatformError> {
         }
         slint::CloseRequestResponse::HideWindow
     });
-    ui.show()?;
+    if in_tray {
+        // At login the panel can come up after us. If no tray shows the icon by
+        // then, open the window after all so the app isn't running unseen.
+        let weak = ui.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_secs(15), move || {
+            if let Some(ui) = weak.upgrade().filter(|_| !tray::shown()) {
+                show(&ui);
+            }
+        });
+    } else {
+        show(ui);
+    }
+    slint::run_event_loop_until_quit()
+}
+
+/// Bring the window up (from the tray too).
+pub fn show(ui: &MainWindow) {
+    let _ = ui.show();
+    // Each time: the window can be made anew when shown again.
     #[cfg(windows)]
     tray::taskbar_icon(ui.window());
-    slint::run_event_loop_until_quit()
 }
 
 fn with_download<T>(id: i64, f: impl FnOnce(&DownloadInfo) -> T) -> Option<T> {

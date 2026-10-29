@@ -17,7 +17,7 @@ usage:
   slipstream pause ID | resume ID
   slipstream remove ID [--delete-file]
   slipstream daemon status | stop
-  slipstream autostart on | off     start the daemon when you log in
+  slipstream autostart on | off     start Slipstream in the tray when you log in
   slipstream register-browsers      let Chrome/Edge/Brave/Vivaldi/Firefox hand downloads over
   slipstream unregister-browsers
 

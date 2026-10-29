@@ -3,7 +3,7 @@
 //! Click the icon to open the window; the menu has Open / Quit.
 
 use std::io::Cursor;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc;
 
 use ksni::menu::StandardItem;
@@ -12,19 +12,23 @@ use slint::Weak;
 
 use crate::MainWindow;
 
-/// Whether a panel shows our icon right now. It can go away, for example when the
-/// desktop shell restarts; then closing the window must end the app instead.
-static SHOWN: AtomicBool = AtomicBool::new(false);
+/// Whether a panel shows our icon right now: not known yet, shown, or not shown.
+/// It can come late (at login the panel may start after us) and go away (the
+/// desktop shell restarts); while it's not shown, closing the window ends the app.
+static STATE: AtomicU8 = AtomicU8::new(UNKNOWN);
+const UNKNOWN: u8 = 0;
+const SHOWN: u8 = 1;
+const GONE: u8 = 2;
 
 pub fn shown() -> bool {
-    SHOWN.load(Ordering::Relaxed)
+    STATE.load(Ordering::Relaxed) == SHOWN
 }
 
 /// The icon lives as long as the app: it runs on its own thread.
 pub struct Tray;
 
 impl Tray {
-    /// Fails when the desktop has no tray (no D-Bus, or no panel that shows these icons).
+    /// Fails without a D-Bus session. With no panel yet it waits for one to appear.
     pub fn new(ui: Weak<MainWindow>) -> Result<Self, String> {
         let (tx, rx) = mpsc::channel();
         std::thread::Builder::new()
@@ -38,9 +42,16 @@ impl Tray {
                     Err(e) => return drop(tx.send(Err(e.to_string()))),
                 };
                 rt.block_on(async move {
-                    match (Item { ui }).spawn().await {
+                    match (Item { ui }).assume_sni_available(true).spawn().await {
                         Ok(_handle) => {
-                            SHOWN.store(true, Ordering::Relaxed);
+                            // Registered, unless watcher_offline already said there is
+                            // no panel yet.
+                            let _ = STATE.compare_exchange(
+                                UNKNOWN,
+                                SHOWN,
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                            );
                             let _ = tx.send(Ok(()));
                             std::future::pending::<()>().await;
                         }
@@ -100,23 +111,22 @@ impl ksni::Tray for Item {
     }
 
     fn watcher_online(&self) {
-        SHOWN.store(true, Ordering::Relaxed);
+        STATE.store(SHOWN, Ordering::Relaxed);
     }
 
     fn watcher_offline(&self, _reason: OfflineReason) -> bool {
-        // The icon is gone: bring the window back so the app isn't stranded, and wait
-        // for the panel to return.
-        SHOWN.store(false, Ordering::Relaxed);
-        show(&self.ui);
+        // If the icon was showing, bring the window back so the app isn't stranded.
+        // Either way, wait for a panel to (re)appear.
+        if STATE.swap(GONE, Ordering::Relaxed) == SHOWN {
+            show(&self.ui);
+        }
         true
     }
 }
 
 /// The tray runs on its own thread; the window belongs to the UI thread.
 fn show(ui: &Weak<MainWindow>) {
-    let _ = ui.upgrade_in_event_loop(|ui| {
-        let _ = slint::ComponentHandle::show(&ui);
-    });
+    let _ = ui.upgrade_in_event_loop(|ui| crate::show(&ui));
 }
 
 /// A PNG as the tray wants it: ARGB, 8 bits each.

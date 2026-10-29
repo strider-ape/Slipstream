@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use slint::{ComponentHandle, Timer, TimerMode, Weak};
+use slint::{Timer, TimerMode, Weak};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
@@ -66,7 +66,7 @@ pub fn shown() -> bool {
 
 fn show(ui: &Weak<MainWindow>) {
     if let Some(ui) = ui.upgrade() {
-        let _ = ui.show();
+        crate::show(&ui);
     }
 }
 

@@ -54,7 +54,7 @@ Name: "{autoprograms}\Slipstream"; Filename: "{app}\slipstream-gui.exe"
 Name: "{autodesktop}\Slipstream"; Filename: "{app}\slipstream-gui.exe"; Tasks: desktopicon
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Slipstream"; ValueData: """{app}\slipstream-gui.exe"""; Tasks: autostart; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Slipstream"; ValueData: """{app}\slipstream-gui.exe"" --tray"; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
 ; Tell Chrome, Edge, Brave, Vivaldi, Chromium and Firefox where the browser bridge is.
