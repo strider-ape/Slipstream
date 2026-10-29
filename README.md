@@ -17,6 +17,7 @@
 - **Never starts over.** Pause, quit, crash or reboot: the download continues from the exact byte where it stopped. If the file changed on the server, it starts clean instead of mixing two versions.
 - **Catches downloads from your browser.** Click a file link in Chrome, Edge, Brave, Vivaldi or Chromium and Slipstream takes it, with the cookies it needs (downloads behind a login work). Right-click any link → *Download with Slipstream*.
 - **Light.** The desktop app uses about 25 MB of RAM; the programs together are under 20 MB. It waits in the tray (Windows, and Linux desktops with a tray: KDE, XFCE, Cinnamon, Ubuntu's GNOME).
+- **Everything on right-click.** Right-click a download to open it, show it in its folder, pause, resume, copy its link, remove it from the list or delete the file (it asks first). Double-click a finished one to open it.
 - **Private.** No accounts, no telemetry, no network port: the app and its background service talk only to each other, and only for your user.
 
 ## Install

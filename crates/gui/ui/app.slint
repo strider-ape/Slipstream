@@ -17,6 +17,11 @@ export struct DownloadRow {
     speed: string,
     eta: string,
     status: string,
+    url: string,
+    // Finished: the file is complete on disk.
+    done: bool,
+    // Downloading or waiting its turn: can be paused.
+    active: bool,
 }
 
 // One piece of the selected download, as fractions of the bar's width.
@@ -55,6 +60,8 @@ export component MainWindow inherits Window {
     in property <string> details;
     in property <string> status-text;
     in-out property <int> selected-id: -1;
+    // The selected download's row, for the right-click menu.
+    in property <DownloadRow> selected-row;
 
     // Settings form
     in-out property <string> s-folder;
@@ -66,9 +73,77 @@ export component MainWindow inherits Window {
     callback pause(int);
     callback resume(int);
     callback remove(int);
+    // Remove from the list and delete the finished file from disk.
+    callback delete-file(int);
+    callback open-file(int);
     callback open-folder(int);
     callback selection-changed(int);
     callback save-settings();
+
+    function select(id: int) {
+        root.selected-id = id;
+        root.selection-changed(id);
+    }
+
+    // Slint has no clipboard call of its own: copy through a hidden text box.
+    function copy-text(text: string) {
+        clip.text = text;
+        clip.select-all();
+        clip.copy();
+    }
+
+    clip := TextInput {
+        width: 0;
+        height: 0;
+        opacity: 0;
+        accessible-role: none;
+    }
+
+    // Asks before a finished file is deleted from disk.
+    property <int> confirm-id: -1;
+    property <string> confirm-name;
+    confirm-popup := PopupWindow {
+        x: (root.width - self.width) / 2;
+        y: 80px;
+        width: min(root.width - 16px, 420px);
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: Theme.bg;
+            border-color: Palette.border;
+            border-width: 1px;
+            border-radius: 6px;
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+                Text {
+                    text: "Delete the file?";
+                    font-weight: 600;
+                }
+                Text {
+                    text: root.confirm-name + " will be removed from the list and deleted from disk.";
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Button {
+                        text: "Cancel";
+                        clicked => {
+                            confirm-popup.close();
+                        }
+                    }
+                    Button {
+                        text: "Delete file";
+                        primary: true;
+                        clicked => {
+                            root.delete-file(root.confirm-id);
+                            confirm-popup.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     add-popup := PopupWindow {
         x: 8px;
@@ -273,62 +348,137 @@ export component MainWindow inherits Window {
             }
         }
 
-        ListView {
+        // Right-click a download: everything that can be done with it. One menu for
+        // the whole list (a menu inside a ListView row doesn't open); rows open it.
+        list-menu := ContextMenuArea {
             vertical-stretch: 1;
-            for row[i] in root.rows: Rectangle {
-                height: 28px;
-                background: row.id == root.selected-id ? Palette.selection-background : Math.mod(i, 2) == 1 ? Palette.alternate-background : transparent;
-                HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
-                    spacing: 8px;
-                    Cell {
-                        text: row.name;
-                        horizontal-stretch: 1;
-                        color: row.id == root.selected-id ? Palette.selection-foreground : Palette.foreground;
+            // Only the rows open it, so it is always about the row under the pointer.
+            enabled: false;
+            Menu {
+                MenuItem {
+                    title: "Open";
+                    enabled: root.selected-row.done;
+                    activated => {
+                        root.open-file(root.selected-id);
                     }
-                    Cell {
-                        text: row.size;
-                        width: 80px;
+                }
+                MenuItem {
+                    title: "Open folder";
+                    activated => {
+                        root.open-folder(root.selected-id);
                     }
+                }
+                MenuSeparator { }
+                MenuItem {
+                    title: "Pause";
+                    enabled: root.selected-row.active;
+                    activated => {
+                        root.pause(root.selected-id);
+                    }
+                }
+                MenuItem {
+                    title: "Resume";
+                    enabled: !root.selected-row.done && !root.selected-row.active;
+                    activated => {
+                        root.resume(root.selected-id);
+                    }
+                }
+                MenuSeparator { }
+                MenuItem {
+                    title: "Copy link";
+                    activated => {
+                        root.copy-text(root.selected-row.url);
+                    }
+                }
+                MenuSeparator { }
+                MenuItem {
+                    title: "Remove from list";
+                    activated => {
+                        root.remove(root.selected-id);
+                    }
+                }
+                MenuItem {
+                    title: "Delete file…";
+                    enabled: root.selected-row.done;
+                    activated => {
+                        root.confirm-id = root.selected-id;
+                        root.confirm-name = root.selected-row.name;
+                        confirm-popup.show();
+                    }
+                }
+            }
+
+            ListView {
+                for row[i] in root.rows: Rectangle {
+                    height: 28px;
+                    background: row.id == root.selected-id ? Palette.selection-background : Math.mod(i, 2) == 1 ? Palette.alternate-background : transparent;
                     HorizontalLayout {
-                        width: 150px;
-                        spacing: 6px;
-                        alignment: center;
-                        Rectangle {
-                            height: 8px;
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 8px;
+                        Cell {
+                            text: row.name;
                             horizontal-stretch: 1;
-                            border-radius: 4px;
-                            background: Theme.track;
+                            color: row.id == root.selected-id ? Palette.selection-foreground : Palette.foreground;
+                        }
+                        Cell {
+                            text: row.size;
+                            width: 80px;
+                        }
+                        HorizontalLayout {
+                            width: 150px;
+                            spacing: 6px;
+                            alignment: center;
                             Rectangle {
-                                x: 0;
-                                width: parent.width * clamp(row.progress, 0, 1);
+                                height: 8px;
+                                horizontal-stretch: 1;
                                 border-radius: 4px;
-                                background: Palette.accent-background;
+                                background: Theme.track;
+                                Rectangle {
+                                    x: 0;
+                                    width: parent.width * clamp(row.progress, 0, 1);
+                                    border-radius: 4px;
+                                    background: Palette.accent-background;
+                                }
+                            }
+                            Cell {
+                                text: Math.round(row.progress * 100) + "%";
+                                width: 36px;
                             }
                         }
                         Cell {
-                            text: Math.round(row.progress * 100) + "%";
-                            width: 36px;
+                            text: row.speed;
+                            width: 90px;
+                        }
+                        Cell {
+                            text: row.eta;
+                            width: 60px;
+                        }
+                        Cell {
+                            text: row.status;
+                            width: 100px;
                         }
                     }
-                    Cell {
-                        text: row.speed;
-                        width: 90px;
-                    }
-                    Cell {
-                        text: row.eta;
-                        width: 60px;
-                    }
-                    Cell {
-                        text: row.status;
-                        width: 100px;
-                    }
-                }
-                TouchArea {
-                    clicked => {
-                        root.selected-id = row.id;
-                        root.selection-changed(row.id);
+                    TouchArea {
+                        clicked => {
+                            root.select(row.id);
+                        }
+                        double-clicked => {
+                            if row.done {
+                                root.open-file(row.id);
+                            }
+                        }
+                        // Right-click: select the row (so the menu is clearly about it),
+                        // then open the list's menu where the pointer is.
+                        pointer-event(e) => {
+                            if e.kind == PointerEventKind.down && e.button == PointerEventButton.right {
+                                root.select(row.id);
+                                list-menu.show({
+                                    x: self.absolute-position.x - list-menu.absolute-position.x + self.mouse-x,
+                                    y: self.absolute-position.y - list-menu.absolute-position.y + self.mouse-y,
+                                });
+                            }
+                        }
                     }
                 }
             }

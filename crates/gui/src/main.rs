@@ -66,6 +66,16 @@ fn main() -> Result<(), slint::PlatformError> {
             delete_file: !done.unwrap_or(false),
         });
     });
+    let s = send.clone();
+    ui.on_delete_file(move |id| {
+        s(Command::Remove {
+            id: id.into(),
+            delete_file: true,
+        });
+    });
+    ui.on_open_file(|id| {
+        with_download(id.into(), open_file);
+    });
     ui.on_open_folder(|id| {
         with_download(id.into(), open_folder);
     });
@@ -206,6 +216,9 @@ fn row(d: &DownloadInfo) -> DownloadRow {
         .into(),
         eta: eta.into(),
         status: status.into(),
+        url: d.url.clone().into(),
+        done: d.status == Status::Complete,
+        active: matches!(d.status, Status::Downloading | Status::Queued),
     }
 }
 
@@ -237,13 +250,14 @@ fn refresh_details(ui: &MainWindow) {
         if let Some(error) = &d.error {
             line += &format!("  ·  {error}");
         }
-        (line, bars)
+        (line, bars, row(d))
     });
-    let (line, bars) = found.unwrap_or_default();
+    let (line, bars, selected) = found.unwrap_or_default();
     if found_none(ui, id) {
         ui.set_selected_id(-1);
     }
     ui.set_details(line.into());
+    ui.set_selected_row(selected);
     if let Some(model) = ui
         .get_segments()
         .as_any()
@@ -300,6 +314,23 @@ pub fn show_caught(popup: &CaughtPopup, d: DownloadInfo) {
     let _ = popup.show();
     #[cfg(windows)]
     tray::taskbar_icon(popup.window());
+}
+
+/// Open a finished file with its usual app.
+fn open_file(d: &DownloadInfo) {
+    let Some(file) = d
+        .name
+        .as_ref()
+        .map(|n| d.dir.join(n))
+        .filter(|f| f.exists())
+    else {
+        return;
+    };
+    #[cfg(windows)]
+    let opener = "explorer";
+    #[cfg(not(windows))]
+    let opener = "xdg-open";
+    let _ = std::process::Command::new(opener).arg(file).spawn();
 }
 
 /// Show the file in the system file manager.
